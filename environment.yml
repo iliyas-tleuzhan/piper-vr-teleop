@@ -1,0 +1,13 @@
+name: piper-vr
+channels:
+  - conda-forge
+dependencies:
+  - python=3.9
+  - numpy
+  - pyyaml
+  - pip
+  - pip:
+      - piper-sdk
+      - pure-python-adb
+      - rospkg
+      - meshcat

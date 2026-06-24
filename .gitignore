@@ -1,0 +1,31 @@
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+*.egg-info/
+
+# Local hardware and third-party binary artifacts.
+third_party/APK/*.apk
+logs/
+*.bag
+
+# Editors and operating systems.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Catkin and ROS generated output.
+devel/
+install/
+log/
+catkin_ws/

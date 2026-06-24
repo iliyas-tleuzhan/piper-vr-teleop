@@ -1,0 +1,26 @@
+can: "can0"
+hz: 20.0
+speed_percent: 10
+
+side: "right"
+deadman_button: "B"
+calibrate_button: "A"
+gripper_enabled: false
+
+scale: 0.35
+max_speed_m_s: 0.08
+
+workspace_min_m: [0.18, -0.32, 0.08]
+workspace_max_m: [0.62, 0.32, 0.55]
+
+axis_mapping:
+  piper_x: "+vr_x"
+  piper_y: "+vr_y"
+  piper_z: "+vr_z"
+
+hold_orientation: true
+default_rpy_deg: null
+
+quest:
+  connection: "usb"
+  ip_address: null

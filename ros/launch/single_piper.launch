@@ -1,0 +1,8 @@
+<launch>
+  <arg name="config" default="$(find piper_vr_teleop)/configs/single_piper.yaml" />
+  <arg name="dry_run" default="true" />
+  <node pkg="piper_vr_teleop" type="movep_teleop.py" name="piper_vr_single" output="screen">
+    <param name="config" value="$(arg config)" />
+    <param name="dry_run" value="$(arg dry_run)" />
+  </node>
+</launch>
