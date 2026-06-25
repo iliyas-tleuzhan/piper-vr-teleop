@@ -28,10 +28,20 @@ class PiperDriver:
         if self.dry_run:
             print("[DRY-RUN] Piper connection skipped.")
             return
+
         self.arm = self._build_arm()
-        self._call_first_available(("ConnectPort", "connect"), self.can)
+
+        # CAN name is already passed to C_PiperInterface_V2(self.can).
+        if hasattr(self.arm, "ConnectPort"):
+            self.arm.ConnectPort()
+        elif hasattr(self.arm, "connect"):
+            self.arm.connect()
+        else:
+            raise RuntimeError("No ConnectPort/connect method found in piper_sdk interface.")
+
         self.enable()
         self.set_move_p_mode()
+
         pose = self.read_end_pose()
         if pose is not None:
             self.last_pose = pose
@@ -41,10 +51,8 @@ class PiperDriver:
             from piper_sdk import C_PiperInterface_V2
         except ImportError as exc:
             raise RuntimeError("piper-sdk is not installed. Install it with `pip install piper-sdk`.") from exc
-        try:
-            return C_PiperInterface_V2(self.can)
-        except TypeError:
-            return C_PiperInterface_V2()
+
+        return C_PiperInterface_V2(self.can)
 
     def _call_first_available(self, names: tuple[str, ...], *args: Any) -> Any:
         if self.arm is None:
@@ -58,13 +66,29 @@ class PiperDriver:
     def enable(self) -> None:
         if self.dry_run:
             return
-        self._call_first_available(("EnableArm", "enable_arm", "MotionCtrl_1"), 1)
+
+        if self.arm is None:
+            raise RuntimeError("Piper interface is not initialized.")
+
+        if hasattr(self.arm, "EnableArm"):
+            self.arm.EnableArm(7, 0x02)  # 7 = all motors, 0x02 = enable
+        else:
+            raise RuntimeError("No EnableArm method found in piper_sdk interface.")
 
     def set_move_p_mode(self) -> None:
         if self.dry_run:
             return
-        self._call_first_available(("MotionCtrl_2",), 0x01, 0x01, self.speed_percent, 0x00)
-        self._call_first_available(("SetMoveP", "set_move_p_mode"))
+
+        if self.arm is None:
+            raise RuntimeError("Piper interface is not initialized.")
+
+        if hasattr(self.arm, "ModeCtrl"):
+            # ctrl_mode=0x01 CAN control, move_mode=0x00 MOVE P endpoint mode
+            self.arm.ModeCtrl(0x01, 0x00, self.speed_percent, 0x00)
+        elif hasattr(self.arm, "MotionCtrl_2"):
+            self.arm.MotionCtrl_2(0x01, 0x00, self.speed_percent, 0x00)
+        else:
+            raise RuntimeError("No ModeCtrl/MotionCtrl_2 method found in piper_sdk interface.")
 
     def read_end_pose(self) -> EndPose | None:
         if self.dry_run:
@@ -124,6 +148,7 @@ class PiperDriver:
             return
         if self.arm is None:
             raise RuntimeError("Piper is not connected")
+        # EndPoseCtrl sends an endpoint pose; Piper firmware performs internal IK.
         self.arm.EndPoseCtrl(*command)
 
     def send_gripper(self, opening_m: float) -> None:

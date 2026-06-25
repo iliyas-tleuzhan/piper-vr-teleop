@@ -10,7 +10,38 @@ pip install piper-sdk
 
 ## `No module named oculus_reader`
 
-Install or place the `oculus_reader` Python module on `PYTHONPATH`. This project expects a compatible module exposing `OculusReader` and `get_transformations_and_buttons()`.
+This repo expects:
+
+```python
+import oculus_reader
+```
+
+Clone AgileX's upstream workspace:
+
+```bash
+cd ~
+git clone https://github.com/agilexrobotics/questVR_ws.git
+```
+
+Find the module:
+
+```bash
+find ~/questVR_ws -type f | grep -i oculus
+```
+
+Add the likely scripts folder to `PYTHONPATH`:
+
+```bash
+export PYTHONPATH=~/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
+```
+
+Then test:
+
+```bash
+python3 -c "import oculus_reader; print('oculus_reader ok')"
+```
+
+You can also run `scripts/setup_upstream_oculus_reader.sh` to print the expected `PYTHONPATH` export.
 
 ## `adb devices` shows no device
 
@@ -60,6 +91,38 @@ scripts/setup_can.sh can0 1000000
 ## Piper does not move
 
 Confirm that real mode is running, the robot is enabled, emergency stop is released, calibration has been completed, and the deadman is held.
+
+Before real robot mode, run dry-run first and verify Piper feedback:
+
+```bash
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run
+python3 scripts/print_piper_pose.py --can can0
+```
+
+Start real mode with slow values:
+
+```bash
+python3 -m piper_vr.movep_teleop \
+  --config configs/single_piper.yaml \
+  --speed-percent 5 \
+  --scale 0.20 \
+  --max-speed 0.04
+```
+
+## Piper connects but does not move
+
+Check that `piper_vr/piper_driver.py` uses:
+
+```python
+arm.ConnectPort()
+arm.EnableArm(7, 0x02)
+arm.ModeCtrl(0x01, 0x00, speed_percent, 0x00)
+arm.EndPoseCtrl(...)
+```
+
+`ModeCtrl` must use `move_mode=0x00` for MOVE P endpoint control. If `move_mode=0x01`, the arm may be in joint mode and endpoint commands may not behave as expected.
+
+`ConnectPort()` must not receive the CAN name. Pass the CAN name to `C_PiperInterface_V2(can_name)` instead.
 
 ## Piper moves in wrong direction
 

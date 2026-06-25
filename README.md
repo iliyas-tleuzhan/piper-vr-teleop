@@ -41,6 +41,16 @@ sudo apt update
 sudo apt install android-tools-adb can-utils
 ```
 
+Install AgileX's upstream Quest reader module and add it to `PYTHONPATH`:
+
+```bash
+cd ~
+git clone https://github.com/agilexrobotics/questVR_ws.git
+find ~/questVR_ws -type f | grep -i oculus
+export PYTHONPATH=~/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
+python3 -c "import oculus_reader; print('oculus_reader ok')"
+```
+
 Install the Quest teleop APK:
 
 ```bash
@@ -69,16 +79,29 @@ Test Piper feedback:
 python3 scripts/print_piper_pose.py --can can0
 ```
 
+Before real robot mode, verify [piper_vr/piper_driver.py](piper_vr/piper_driver.py) uses Piper SDK V2 endpoint control:
+
+```python
+arm.ConnectPort()
+arm.EnableArm(7, 0x02)
+arm.ModeCtrl(0x01, 0x00, speed_percent, 0x00)
+arm.EndPoseCtrl(...)
+```
+
 Run dry-run teleop first:
 
 ```bash
 python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run
 ```
 
-Run real teleop only after dry-run behaves correctly:
+Run real teleop only after dry-run behaves correctly. Start with slow values:
 
 ```bash
-python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml
+python3 -m piper_vr.movep_teleop \
+  --config configs/single_piper.yaml \
+  --speed-percent 5 \
+  --scale 0.20 \
+  --max-speed 0.04
 ```
 
 ## Controls

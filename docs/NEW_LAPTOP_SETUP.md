@@ -57,7 +57,48 @@ python3 -c "import piper_sdk; print('piper-sdk import ok')"
 
 Use the Meta mobile app and Meta developer account flow to enable developer mode for the headset. Reboot the headset after enabling it.
 
-## 6. Install the Quest APK
+## 6. Install upstream oculus_reader
+
+This project expects:
+
+```python
+import oculus_reader
+```
+
+Clone AgileX's upstream Quest workspace:
+
+```bash
+cd ~
+git clone https://github.com/agilexrobotics/questVR_ws.git
+```
+
+Find the module:
+
+```bash
+find ~/questVR_ws -type f | grep -i oculus
+```
+
+Add the likely scripts folder to `PYTHONPATH`:
+
+```bash
+export PYTHONPATH=~/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
+```
+
+Verify import:
+
+```bash
+python3 -c "import oculus_reader; print('oculus_reader ok')"
+```
+
+You can also run:
+
+```bash
+scripts/setup_upstream_oculus_reader.sh
+```
+
+and copy the printed `PYTHONPATH` export into your shell config.
+
+## 7. Install the Quest APK
 
 Place the APK at:
 
@@ -71,7 +112,7 @@ Connect the Quest with USB-C, put on the headset, and accept USB debugging. Then
 scripts/install_quest_apk.sh
 ```
 
-## 7. Verify ADB
+## 8. Verify ADB
 
 ```bash
 adb devices
@@ -86,7 +127,7 @@ List of devices attached
 
 If it says `unauthorized`, put on the headset and accept USB debugging.
 
-## 8. Set up CAN
+## 9. Set up CAN
 
 Connect the CAN adapter and bring it up:
 
@@ -95,7 +136,20 @@ scripts/setup_can.sh can0 1000000
 ip -details link show can0
 ```
 
-## 9. Verify Piper feedback
+## 10. Verify Piper driver setup
+
+Before real robot mode, patch or verify [../piper_vr/piper_driver.py](../piper_vr/piper_driver.py) uses Piper SDK V2 endpoint control:
+
+```python
+arm.ConnectPort()
+arm.EnableArm(7, 0x02)
+arm.ModeCtrl(0x01, 0x00, speed_percent, 0x00)
+arm.EndPoseCtrl(...)
+```
+
+`ConnectPort()` must not receive the CAN name. The CAN name belongs in `C_PiperInterface_V2(can_name)`.
+
+## 11. Verify Piper feedback
 
 Power the Piper, check emergency stop status, and run:
 
@@ -103,7 +157,7 @@ Power the Piper, check emergency stop status, and run:
 python3 scripts/print_piper_pose.py --can can0
 ```
 
-## 10. Run dry-run
+## 12. Run dry-run
 
 ```bash
 python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run
@@ -111,12 +165,16 @@ python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run
 
 Press `A` to calibrate and hold `B` to allow target updates. Dry-run prints endpoint commands instead of moving the robot.
 
-## 11. Run real teleop
+## 13. Run real teleop
 
-Only continue after dry-run looks correct:
+Only continue after dry-run looks correct. Start with slow values:
 
 ```bash
-python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml
+python3 -m piper_vr.movep_teleop \
+  --config configs/single_piper.yaml \
+  --speed-percent 5 \
+  --scale 0.20 \
+  --max-speed 0.04
 ```
 
 Keep the robot workspace clear. Release the deadman to hold position.
