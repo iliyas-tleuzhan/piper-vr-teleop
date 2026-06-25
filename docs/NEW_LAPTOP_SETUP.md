@@ -157,24 +157,36 @@ Power the Piper, check emergency stop status, and run:
 python3 scripts/print_piper_pose.py --can can0
 ```
 
-## 12. Run dry-run
+## 12. Run endpoint wrapper test
+
+Before debugging VR, verify the repo wrapper can move the endpoint:
 
 ```bash
-python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run
+python3 scripts/test_piper_endpoint.py --can can0
 ```
 
-Press `A` to calibrate and hold `B` to allow target updates. Dry-run prints endpoint commands instead of moving the robot.
+If this does not move, keep debugging Piper/CAN/driver setup before testing Quest teleop.
 
-## 13. Run real teleop
+## 13. Run dry-run
+
+```bash
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run --verbose
+```
+
+Press `A` to calibrate and hold `rightGrip` to allow target updates. Dry-run prints endpoint commands instead of moving the robot.
+
+## 14. Run real teleop
 
 Only continue after dry-run looks correct. Start with slow values:
 
 ```bash
 python3 -m piper_vr.movep_teleop \
   --config configs/single_piper.yaml \
+  --can can0 \
   --speed-percent 5 \
-  --scale 0.20 \
-  --max-speed 0.04
+  --scale 0.40 \
+  --max-speed 0.05 \
+  --verbose
 ```
 
 Keep the robot workspace clear. Release the deadman to hold position.

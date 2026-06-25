@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 from typing import Any
 
 import numpy as np
@@ -39,6 +40,8 @@ class PiperDriver:
         else:
             raise RuntimeError("No ConnectPort/connect method found in piper_sdk interface.")
 
+        time.sleep(1.0)
+
         self.enable()
         self.set_move_p_mode()
 
@@ -70,10 +73,13 @@ class PiperDriver:
         if self.arm is None:
             raise RuntimeError("Piper interface is not initialized.")
 
-        if hasattr(self.arm, "EnableArm"):
-            self.arm.EnableArm(7, 0x02)  # 7 = all motors, 0x02 = enable
-        else:
+        if not hasattr(self.arm, "EnableArm"):
             raise RuntimeError("No EnableArm method found in piper_sdk interface.")
+
+        print("[Piper] Enabling all motors...")
+        for _ in range(5):
+            self.arm.EnableArm(7, 0x02)  # 7 = all motors, 0x02 = enable
+            time.sleep(0.2)
 
     def set_move_p_mode(self) -> None:
         if self.dry_run:
@@ -82,13 +88,16 @@ class PiperDriver:
         if self.arm is None:
             raise RuntimeError("Piper interface is not initialized.")
 
-        if hasattr(self.arm, "ModeCtrl"):
-            # ctrl_mode=0x01 CAN control, move_mode=0x00 MOVE P endpoint mode
-            self.arm.ModeCtrl(0x01, 0x00, self.speed_percent, 0x00)
-        elif hasattr(self.arm, "MotionCtrl_2"):
-            self.arm.MotionCtrl_2(0x01, 0x00, self.speed_percent, 0x00)
-        else:
-            raise RuntimeError("No ModeCtrl/MotionCtrl_2 method found in piper_sdk interface.")
+        print("[Piper] Setting MOVE P endpoint mode...")
+        for _ in range(5):
+            if hasattr(self.arm, "ModeCtrl"):
+                # ctrl_mode=0x01 CAN control, move_mode=0x00 MOVE P endpoint mode
+                self.arm.ModeCtrl(0x01, 0x00, self.speed_percent, 0x00)
+            elif hasattr(self.arm, "MotionCtrl_2"):
+                self.arm.MotionCtrl_2(0x01, 0x00, self.speed_percent, 0x00)
+            else:
+                raise RuntimeError("No ModeCtrl/MotionCtrl_2 method found in piper_sdk interface.")
+            time.sleep(0.2)
 
     def read_end_pose(self) -> EndPose | None:
         if self.dry_run:

@@ -95,8 +95,10 @@ Confirm that real mode is running, the robot is enabled, emergency stop is relea
 Before real robot mode, run dry-run first and verify Piper feedback:
 
 ```bash
-python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run
+scripts/setup_can.sh can0 1000000
 python3 scripts/print_piper_pose.py --can can0
+python3 scripts/test_piper_endpoint.py --can can0
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run --verbose
 ```
 
 Start real mode with slow values:
@@ -104,9 +106,20 @@ Start real mode with slow values:
 ```bash
 python3 -m piper_vr.movep_teleop \
   --config configs/single_piper.yaml \
+  --can can0 \
   --speed-percent 5 \
-  --scale 0.20 \
-  --max-speed 0.04
+  --scale 0.40 \
+  --max-speed 0.05 \
+  --verbose
+```
+
+Required real-robot test order:
+
+```bash
+scripts/setup_can.sh can0 1000000
+python3 scripts/test_piper_endpoint.py --can can0
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run --verbose
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --can can0 --speed-percent 5 --scale 0.40 --max-speed 0.05 --verbose
 ```
 
 ## Piper connects but does not move
@@ -123,6 +136,27 @@ arm.EndPoseCtrl(...)
 `ModeCtrl` must use `move_mode=0x00` for MOVE P endpoint control. If `move_mode=0x01`, the arm may be in joint mode and endpoint commands may not behave as expected.
 
 `ConnectPort()` must not receive the CAN name. Pass the CAN name to `C_PiperInterface_V2(can_name)` instead.
+
+If raw `piper_sdk` movement works but `PiperDriver` does not, the wrapper must repeat enable and MOVE P mode setup with delays:
+
+```python
+for _ in range(5):
+    arm.EnableArm(7, 0x02)
+    time.sleep(0.2)
+
+for _ in range(5):
+    arm.ModeCtrl(0x01, 0x00, speed_percent, 0x00)
+    time.sleep(0.2)
+```
+
+If `scripts/test_piper_endpoint.py --can can0` does not move, do not debug VR yet. Fix Piper/CAN/driver setup first.
+
+If `scripts/test_piper_endpoint.py --can can0` moves but VR teleop does not, run with `--verbose` and check the deadman state, raw target, and safe target:
+
+```bash
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run --verbose
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --can can0 --speed-percent 5 --scale 0.40 --max-speed 0.05 --verbose
+```
 
 ## Piper moves in wrong direction
 

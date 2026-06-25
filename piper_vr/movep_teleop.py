@@ -54,8 +54,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--deadman-button")
     parser.add_argument("--gripper", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--quest-ip")
     return parser
+
+
+def _format_xyz(value: np.ndarray | None) -> str:
+    if value is None:
+        return "None"
+    return np.asarray(value, dtype=float).round(4).tolist().__repr__()
 
 
 def main() -> int:
@@ -64,7 +71,7 @@ def main() -> int:
     hz = float(config.get("hz", 20.0))
     period_s = 1.0 / hz
     side = config.get("side", "right")
-    deadman_button = config.get("deadman_button", "B")
+    deadman_button = config.get("deadman_button", "rightGrip")
     calibrate_button = config.get("calibrate_button", "A")
     quest_ip = config.get("quest", {}).get("ip_address")
 
@@ -91,6 +98,42 @@ def main() -> int:
     piper_home = None
     rpy_home = None
     was_calibrate_pressed = False
+    next_verbose_s = 0.0
+
+    def maybe_print_verbose(
+        *,
+        buttons: dict,
+        calibrated_state: bool,
+        deadman_state: bool,
+        calibrate_state: bool,
+        controller_xyz: np.ndarray | None = None,
+        raw_target_xyz: np.ndarray | None = None,
+        safe_target_xyz: np.ndarray | None = None,
+        command_sent: bool = False,
+        skipped_reason: str | None = None,
+    ) -> None:
+        nonlocal next_verbose_s
+        if not args.verbose:
+            return
+        now_s = time.monotonic()
+        if now_s < next_verbose_s:
+            return
+        next_verbose_s = now_s + 0.2
+        piper_pose = driver.read_end_pose()
+        piper_xyz = None if piper_pose is None else piper_pose.xyz_m
+        status = "calibrated" if calibrated_state else "waiting_for_calibration"
+        action = "sent" if command_sent else f"skipped:{skipped_reason or 'none'}"
+        print(
+            "[verbose] "
+            f"status={status} "
+            f"deadman={deadman_state} "
+            f"calibrate={calibrate_state} "
+            f"controller_xyz={_format_xyz(controller_xyz)} "
+            f"raw_target_xyz={_format_xyz(raw_target_xyz)} "
+            f"safe_target_xyz={_format_xyz(safe_target_xyz)} "
+            f"action={action} "
+            f"piper_xyz={_format_xyz(piper_xyz)}"
+        )
 
     try:
         while True:
@@ -98,6 +141,8 @@ def main() -> int:
             buttons = quest.get_buttons()
             deadman = is_pressed(buttons, deadman_button)
             calibrate_pressed = is_pressed(buttons, calibrate_button)
+            current_vr = None
+            controller_xyz = None
 
             if calibrate_pressed and not was_calibrate_pressed:
                 vr_home = quest.get_controller_pose(side)
@@ -114,23 +159,58 @@ def main() -> int:
             was_calibrate_pressed = calibrate_pressed
 
             if not calibrated:
+                maybe_print_verbose(
+                    buttons=buttons,
+                    calibrated_state=calibrated,
+                    deadman_state=deadman,
+                    calibrate_state=calibrate_pressed,
+                    skipped_reason="not_calibrated",
+                )
                 print("Waiting for calibration. Press the calibrate button while the robot is in a safe pose.", end="\r")
                 time.sleep(period_s)
                 continue
 
             if tracking_is_stale(quest.last_update_s, safety.stale_timeout_s):
+                maybe_print_verbose(
+                    buttons=buttons,
+                    calibrated_state=calibrated,
+                    deadman_state=deadman,
+                    calibrate_state=calibrate_pressed,
+                    skipped_reason="tracking_stale",
+                )
                 print("Quest tracking is stale or missing; holding position.", end="\r")
                 time.sleep(period_s)
                 continue
 
             if not deadman:
+                current_vr = quest.get_controller_pose(side)
+                controller_xyz = current_vr[:3, 3]
+                maybe_print_verbose(
+                    buttons=buttons,
+                    calibrated_state=calibrated,
+                    deadman_state=deadman,
+                    calibrate_state=calibrate_pressed,
+                    controller_xyz=controller_xyz,
+                    skipped_reason="deadman_released",
+                )
                 time.sleep(period_s)
                 continue
 
             current_vr = quest.get_controller_pose(side)
+            controller_xyz = current_vr[:3, 3]
             target = target_from_home(vr_home, current_vr, piper_home, mapping, scale)
             safe_target = safety.limit_step(target)
             driver.send_end_pose(safe_target, rpy_home)
+            maybe_print_verbose(
+                buttons=buttons,
+                calibrated_state=calibrated,
+                deadman_state=deadman,
+                calibrate_state=calibrate_pressed,
+                controller_xyz=controller_xyz,
+                raw_target_xyz=target,
+                safe_target_xyz=safe_target,
+                command_sent=True,
+            )
 
             if config.get("gripper_enabled", False):
                 trigger_key = "rightTrig" if side == "right" else "leftTrig"

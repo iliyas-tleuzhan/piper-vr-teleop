@@ -3,7 +3,7 @@ hz: 20.0
 speed_percent: 10
 
 side: "right"
-deadman_button: "B"
+deadman_button: "rightGrip"
 calibrate_button: "A"
 gripper_enabled: false
 

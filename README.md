@@ -88,27 +88,44 @@ arm.ModeCtrl(0x01, 0x00, speed_percent, 0x00)
 arm.EndPoseCtrl(...)
 ```
 
-Run dry-run teleop first:
+Run the direct endpoint wrapper test before debugging VR:
 
 ```bash
-python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run
+python3 scripts/test_piper_endpoint.py --can can0
 ```
 
-Run real teleop only after dry-run behaves correctly. Start with slow values:
+Run dry-run teleop with verbose status:
+
+```bash
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run --verbose
+```
+
+Run real teleop only after the endpoint test moves and dry-run behaves correctly. Start with slow values:
 
 ```bash
 python3 -m piper_vr.movep_teleop \
   --config configs/single_piper.yaml \
+  --can can0 \
   --speed-percent 5 \
-  --scale 0.20 \
-  --max-speed 0.04
+  --scale 0.40 \
+  --max-speed 0.05 \
+  --verbose
+```
+
+Required real-robot test order:
+
+```bash
+scripts/setup_can.sh can0 1000000
+python3 scripts/test_piper_endpoint.py --can can0
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run --verbose
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --can can0 --speed-percent 5 --scale 0.40 --max-speed 0.05 --verbose
 ```
 
 ## Controls
 
 - Right controller controls the single Piper by default.
 - `A` calibrates the VR home pose to the current Piper end-effector pose.
-- Hold `B` as the deadman switch by default.
+- Hold `rightGrip` as the deadman switch by default.
 - Releasing the deadman holds the last command.
 - Right trigger can control the gripper when `gripper_enabled: true`.
 - `Ctrl+C` exits cleanly and sends a hold command.
