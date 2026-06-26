@@ -14,7 +14,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from piper_vr.piper_kinematics import PiperKinematics  # noqa: E402
-from simulate_piper_urdf import read_stl, transform_triangles  # noqa: E402
+from simulate_piper_urdf import read_visual_mesh, transform_triangles  # noqa: E402
 
 
 def matrix_to_rpy_deg(rotation: np.ndarray) -> np.ndarray:
@@ -36,9 +36,9 @@ def main() -> int:
     args = parser.parse_args()
 
     model = PiperKinematics(args.urdf)
-    mesh_dir = Path(args.urdf).resolve().parents[1] / "meshes"
-    meshes = {"base_link": read_stl(mesh_dir / "base_link.stl", args.triangles_per_link)}
-    meshes.update({f"link{index}": read_stl(mesh_dir / f"link{index}.stl", args.triangles_per_link) for index in range(1, 7)})
+    mesh_dir = Path(args.urdf).resolve().parents[1] / "meshes" / "dae"
+    meshes = {"base_link": read_visual_mesh(mesh_dir / "base_link.dae", args.triangles_per_link)}
+    meshes.update({f"link{index}": read_visual_mesh(mesh_dir / f"link{index}.dae", args.triangles_per_link) for index in range(1, 7)})
 
     # Motion remains 30% inside every joint's legal range, so no frame can
     # approach the hard stops. Different phase offsets exercise all six axes.

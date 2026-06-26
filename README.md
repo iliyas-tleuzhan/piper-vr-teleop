@@ -180,7 +180,7 @@ Before each endpoint command, the guard solves damped least-squares IK against `
 
 ## Offline URDF simulation
 
-Render the actual Piper STL meshes with six joint sliders. This is fully offline and cannot communicate with CAN hardware:
+Render AgileX's detailed Piper visual DAE meshes with six joint sliders. This is fully offline and cannot communicate with CAN hardware:
 
 ```bash
 python3 scripts/simulate_piper_urdf.py

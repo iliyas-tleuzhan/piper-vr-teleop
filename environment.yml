@@ -13,3 +13,5 @@ dependencies:
       - rospkg
       - meshcat
       - imageio-ffmpeg
+      - trimesh
+      - pycollada

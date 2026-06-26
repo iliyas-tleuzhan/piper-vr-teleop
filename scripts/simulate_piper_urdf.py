@@ -35,6 +35,38 @@ def read_stl(path: Path, max_triangles: int) -> np.ndarray:
     return triangles[::stride]
 
 
+def read_visual_mesh(path: Path, max_triangles: int) -> np.ndarray:
+    """Read a URDF visual mesh, including AgileX's detailed Collada DAE files."""
+    if path.suffix.lower() == ".stl":
+        return read_stl(path, max_triangles)
+    if path.suffix.lower() != ".dae":
+        raise ValueError(f"Unsupported mesh format: {path}")
+    try:
+        import trimesh
+    except ImportError as exc:
+        raise RuntimeError("DAE visual meshes require `pip install trimesh pycollada`.") from exc
+    scene = trimesh.load(path, force="scene")
+    mesh = trimesh.util.concatenate(tuple(scene.geometry.values()))
+    # Sampling arbitrary faces makes a sparse point cloud. Cluster vertices into
+    # a regular grid instead: this preserves the visible exterior while reducing
+    # the dense CAD visual mesh enough for an animated Matplotlib renderer.
+    extent = float(np.max(mesh.bounds[1] - mesh.bounds[0]))
+    cell_size = extent / max(8.0, np.sqrt(float(max_triangles)))
+    keys = np.floor(mesh.vertices / cell_size + 0.5).astype(np.int64)
+    _, inverse = np.unique(keys, axis=0, return_inverse=True)
+    count = int(inverse.max()) + 1
+    vertices = np.zeros((count, 3), dtype=float)
+    np.add.at(vertices, inverse, mesh.vertices)
+    vertices /= np.bincount(inverse, minlength=count)[:, None]
+    faces = inverse[mesh.faces]
+    valid = (faces[:, 0] != faces[:, 1]) & (faces[:, 0] != faces[:, 2]) & (faces[:, 1] != faces[:, 2])
+    faces = faces[valid]
+    # Remove coincident triangles created by vertex clustering while keeping the
+    # first winding order for shading.
+    _, first = np.unique(np.sort(faces, axis=1), axis=0, return_index=True)
+    return vertices[faces[np.sort(first)]]
+
+
 def transform_triangles(triangles: np.ndarray, transform: np.ndarray) -> np.ndarray:
     return triangles @ transform[:3, :3].T + transform[:3, 3]
 
@@ -50,9 +82,9 @@ def main() -> int:
         parser.error("--no-gui requires --output")
 
     model = PiperKinematics(args.urdf)
-    mesh_dir = Path(args.urdf).resolve().parents[1] / "meshes"
-    meshes = {"base_link": read_stl(mesh_dir / "base_link.stl", args.triangles_per_link)}
-    meshes.update({f"link{index}": read_stl(mesh_dir / f"link{index}.stl", args.triangles_per_link) for index in range(1, 7)})
+    mesh_dir = Path(args.urdf).resolve().parents[1] / "meshes" / "dae"
+    meshes = {"base_link": read_visual_mesh(mesh_dir / "base_link.dae", args.triangles_per_link)}
+    meshes.update({f"link{index}": read_visual_mesh(mesh_dir / f"link{index}.dae", args.triangles_per_link) for index in range(1, 7)})
     q = (model.lower + model.upper) / 2
 
     figure = plt.figure(figsize=(10, 9))

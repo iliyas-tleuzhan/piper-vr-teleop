@@ -14,7 +14,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from piper_vr.piper_kinematics import PiperKinematics  # noqa: E402
-from simulate_piper_urdf import read_stl, transform_triangles  # noqa: E402
+from simulate_piper_urdf import read_visual_mesh, transform_triangles  # noqa: E402
 
 
 def _line(axis, points: np.ndarray, *, color: str, width: float, style: str = "-"):
@@ -70,15 +70,15 @@ def main() -> int:
     parser.add_argument("--output", default="assets/piper_vr_teleop_demo.gif")
     parser.add_argument("--fps", type=int, default=8)
     parser.add_argument("--seconds", type=float, default=15.0)
-    parser.add_argument("--triangles-per-link", type=int, default=100)
+    parser.add_argument("--triangles-per-link", type=int, default=180, help="visual mesh detail budget per link")
     args = parser.parse_args()
     if args.seconds < 15:
         parser.error("The demo must be at least 15 seconds.")
 
     model = PiperKinematics(args.urdf)
-    mesh_dir = Path(args.urdf).resolve().parents[1] / "meshes"
-    meshes = {"base_link": read_stl(mesh_dir / "base_link.stl", args.triangles_per_link)}
-    meshes.update({f"link{index}": read_stl(mesh_dir / f"link{index}.stl", args.triangles_per_link) for index in range(1, 7)})
+    mesh_dir = Path(args.urdf).resolve().parents[1] / "meshes" / "dae"
+    meshes = {"base_link": read_visual_mesh(mesh_dir / "base_link.dae", args.triangles_per_link)}
+    meshes.update({f"link{index}": read_visual_mesh(mesh_dir / f"link{index}.dae", args.triangles_per_link) for index in range(1, 7)})
     # GIF stores delays in 10 ms ticks. Pillow rounds 8 FPS to 120 ms rather
     # than 125 ms, so calculate against that effective duration and guarantee
     # the requested minimum playback time.
@@ -119,7 +119,7 @@ def main() -> int:
             arm_artists.append(collection)
         # Add a clear URDF joint-chain silhouette over the mesh decimation.
         joint_points = np.array([transforms["base_link"][:3, 3]] + [transforms[f"link{i}"][:3, 3] for i in range(1, 7)])
-        arm_artists.append(_line(axis, joint_points, color="#174A75", width=5))
+        arm_artists.append(_line(axis, joint_points, color="#174A75", width=2))
         endpoint = transforms["link6"][:3, 3]
         # This is the corresponding controller motion in a separate left-side
         # demonstration volume. Its translation follows the endpoint, scaled down.
