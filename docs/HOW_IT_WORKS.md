@@ -24,7 +24,7 @@ This makes future controller motion relative to a known robot pose.
 
 ## 3. Map Motion
 
-Controller translation delta is scaled and mapped into Piper XYZ target motion. Axis signs and assignments are configured in YAML.
+Controller translation and rotation deltas are scaled and mapped into Piper XYZ/RPY target motion. Both are relative to the grip/clutch point; axis signs and assignments are configured in YAML. Orientation motion has separate angular speed and angle limits.
 
 ## 4. Apply Safety
 

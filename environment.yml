@@ -5,9 +5,11 @@ dependencies:
   - python=3.9
   - numpy
   - pyyaml
+  - matplotlib
   - pip
   - pip:
       - piper-sdk
       - pure-python-adb
       - rospkg
       - meshcat
+      - imageio-ffmpeg
