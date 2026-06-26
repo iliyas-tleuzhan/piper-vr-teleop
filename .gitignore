@@ -29,3 +29,4 @@ devel/
 install/
 log/
 catkin_ws/
+outputs/

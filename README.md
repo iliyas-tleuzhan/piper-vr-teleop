@@ -2,6 +2,8 @@
 
 Piper VR Teleop is a clean English reference project for controlling an AgileX Piper arm with a Meta Quest 3 controller. The Quest controller acts like a 3D target dot: after calibration, moving the controller moves the Piper end effector through Piper endpoint control.
 
+![Offline Quest controller to Piper URDF teleoperation simulation](assets/piper_vr_teleop_demo.gif)
+
 The first working path uses Piper built-in endpoint IK through:
 
 ```python
@@ -94,10 +96,16 @@ Run the direct endpoint wrapper test before debugging VR:
 python3 scripts/test_piper_endpoint.py --can can0
 ```
 
+Create a local configuration (the defaults use controller-local forward/right/up motion):
+
+```bash
+python3 scripts/create_teleop_config.py --can can0
+```
+
 Run dry-run teleop with verbose status:
 
 ```bash
-python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run --verbose
+python3 -m piper_vr.movep_teleop --config configs/local_piper.yaml --dry-run --verbose
 ```
 
 Run real teleop only after the endpoint test moves and dry-run behaves correctly. Start with slow values:
@@ -125,8 +133,9 @@ python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --can can0 -
 
 - Right controller controls the single Piper by default.
 - `A` calibrates the VR home pose to the current Piper end-effector pose.
-- Hold `rightGrip` as the deadman switch by default.
-- Releasing the deadman holds the last command.
+- Release, then press and hold `rightGrip` to arm motion. Each new press is a clutch point, so controller motion while released is ignored.
+- Releasing the deadman commands the measured current endpoint pose, stopping the arm instead of allowing it to finish an old target.
+- While the deadman is held, controller rotation changes endpoint roll/pitch/yaw. It is limited to ±45° roll/pitch, ±60° yaw, and 60°/s by default.
 - Right trigger can control the gripper when `gripper_enabled: true`.
 - `Ctrl+C` exits cleanly and sends a hold command.
 
@@ -139,6 +148,7 @@ All controls are configurable in [configs/single_piper.yaml](configs/single_pipe
 - Workspace limits clamp the target position.
 - Cartesian speed limiting prevents large endpoint steps.
 - Tracking loss or stale Quest data causes a hold.
+- A constrained IK guard built from the bundled Piper URDF rejects targets outside the six joint limits before they are sent to the firmware. Use `--no-urdf-guard` only for diagnosis.
 - Real robot mode prints a warning before connecting.
 - Start with dry-run and low speed.
 
@@ -158,15 +168,45 @@ Internally, this project uses meters and degrees for readability. Piper endpoint
 - XYZ: `0.001 mm`
 - RX/RY/RZ: `0.001 degrees`
 
+## URDF kinematic guard
+
+The Piper model is pinned as the `third_party/agx_arm_urdf` Git submodule, sourced from AgileX's [`agx_arm_urdf`](https://github.com/agilexrobotics/agx_arm_urdf/tree/main/piper) repository. Initialize it after cloning this repository:
+
+```bash
+git submodule update --init --recursive
+```
+
+Before each endpoint command, the guard solves damped least-squares IK against `joint1` through `joint6`, respects the URDF hard limits, and holds the arm if no solution meets the 4 mm / 6° tolerance. It remains an endpoint-command guard: Piper firmware still produces the hardware joint command. That avoids using an unverified SDK joint-control interface.
+
+## Offline URDF simulation
+
+Render the actual Piper STL meshes with six joint sliders. This is fully offline and cannot communicate with CAN hardware:
+
+```bash
+python3 scripts/simulate_piper_urdf.py
+```
+
+To produce a shareable initial-pose image without opening a window:
+
+```bash
+python3 scripts/simulate_piper_urdf.py --no-gui --output outputs/piper_urdf.png
+```
+
+Record an offline mesh-motion test (all frames are checked against FK, IK, and URDF joint limits):
+
+```bash
+python3 scripts/record_piper_urdf_demo.py --output outputs/piper_urdf_motion_test.mp4
+```
+
 ## Axis Mapping
 
-If moving the controller in one direction moves Piper in the wrong direction, edit:
+The default mapping is controller-local: controller forward/right/up maps to Piper forward/right/up regardless of headset direction. If your Piper is mounted with a nonstandard base orientation, edit:
 
 ```yaml
 axis_mapping:
-  piper_x: "+vr_x"
-  piper_y: "+vr_y"
-  piper_z: "+vr_z"
+  piper_x: "-vr_z"
+  piper_y: "-vr_x"
+  piper_z: "+vr_y"
 ```
 
 See [docs/AXIS_MAPPING.md](docs/AXIS_MAPPING.md).

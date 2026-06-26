@@ -4,9 +4,10 @@ Axis mapping lives in `configs/single_piper.yaml`:
 
 ```yaml
 axis_mapping:
-  piper_x: "+vr_x"
-  piper_y: "+vr_y"
-  piper_z: "+vr_z"
+  translation_frame: "controller_home"
+  piper_x: "-vr_z"
+  piper_y: "-vr_x"
+  piper_z: "+vr_y"
 ```
 
 Each output axis can read one Quest axis with a sign:
@@ -17,6 +18,8 @@ Each output axis can read one Quest axis with a sign:
 - `-vr_y`
 - `+vr_z`
 - `-vr_z`
+
+`translation_frame: controller_home` is the recommended default. It converts Quest room coordinates into the controller orientation present at calibration, so controller forward/right/up have stable meanings. Use `quest_world` only when you intentionally want fixed room-coordinate mapping.
 
 ## Controller forward makes Piper go backward
 

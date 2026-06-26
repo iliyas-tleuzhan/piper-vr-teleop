@@ -24,6 +24,7 @@ class PiperDriver:
         self.dry_run = dry_run
         self.arm: Any | None = None
         self.last_pose = EndPose(np.array([0.35, 0.0, 0.25], dtype=float), np.zeros(3, dtype=float))
+        self.last_command = EndPose(self.last_pose.xyz_m.copy(), self.last_pose.rpy_deg.copy())
 
     def connect(self) -> None:
         if self.dry_run:
@@ -148,8 +149,12 @@ class PiperDriver:
             degrees_to_piper_rpy(float(rpy_deg[1])),
             degrees_to_piper_rpy(float(rpy_deg[2])),
         ]
-        self.last_pose = EndPose(xyz_m.copy(), rpy_deg.copy())
+        # Keep commanded and measured poses separate.  Treating a requested pose as
+        # feedback makes a deadman hold command chase an old target while the arm is
+        # still moving.
+        self.last_command = EndPose(xyz_m.copy(), rpy_deg.copy())
         if self.dry_run:
+            self.last_pose = EndPose(xyz_m.copy(), rpy_deg.copy())
             print(
                 "[DRY-RUN] EndPoseCtrl "
                 f"xyz_m={xyz_m.round(4).tolist()} rpy_deg={rpy_deg.round(2).tolist()} raw={command}"
@@ -169,4 +174,8 @@ class PiperDriver:
         self._call_first_available(("GripperCtrl", "gripper_ctrl"), raw, 1000, 0x01, 0)
 
     def hold(self) -> None:
-        self.send_end_pose(self.last_pose.xyz_m, self.last_pose.rpy_deg)
+        """Command the measured pose, rather than the previous target, to stop motion."""
+        pose = self.read_end_pose()
+        if pose is None:
+            pose = self.last_pose
+        self.send_end_pose(pose.xyz_m, pose.rpy_deg)

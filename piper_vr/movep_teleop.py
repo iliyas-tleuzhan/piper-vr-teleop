@@ -11,9 +11,10 @@ import yaml
 
 from .buttons import analog_value, is_pressed
 from .piper_driver import PiperDriver
+from .piper_kinematics import PiperKinematics
 from .quest_reader import QuestReader
-from .safety import SafetyLimiter, tracking_is_stale
-from .vr_mapping import AxisMapping, target_from_home
+from .safety import OrientationLimiter, SafetyLimiter, tracking_is_stale
+from .vr_mapping import AxisMapping, orientation_target_from_home, target_from_home
 
 
 def load_config(path: str | Path) -> dict:
@@ -39,6 +40,8 @@ def apply_overrides(config: dict, args: argparse.Namespace) -> dict:
     if args.quest_ip:
         config.setdefault("quest", {})["ip_address"] = args.quest_ip
         config["quest"]["connection"] = "wireless"
+    if args.no_urdf_guard:
+        config["urdf_guard_enabled"] = False
     return config
 
 
@@ -56,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--quest-ip")
+    parser.add_argument("--no-urdf-guard", action="store_true", help="disable constrained URDF IK feasibility checks")
     return parser
 
 
@@ -90,15 +94,63 @@ def main() -> int:
     )
     driver.connect()
     safety = SafetyLimiter.from_config(config)
+    orientation_safety = OrientationLimiter(float(config.get("max_angular_speed_deg_s", 60.0)))
     mapping = AxisMapping.from_config(config.get("axis_mapping"))
-    scale = float(config.get("scale", 0.35))
+    scale = float(config.get("scale", 1.0))
+    orientation_enabled = bool(config.get("orientation_enabled", True))
+    orientation_scale = float(config.get("orientation_scale", 1.0))
+    max_orientation_delta_deg = np.asarray(config.get("max_orientation_delta_deg", [45.0, 45.0, 60.0]), dtype=float)
+    urdf_guard_enabled = bool(config.get("urdf_guard_enabled", True))
+    kinematics = None
+    ik_seed = None
+    if urdf_guard_enabled:
+        urdf_path = Path(config.get("urdf_path", "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"))
+        kinematics = PiperKinematics(urdf_path)
+        print(f"URDF constrained IK guard: {urdf_path} ({', '.join(joint.name for joint in kinematics.joints)})")
 
     calibrated = False
     vr_home = None
     piper_home = None
     rpy_home = None
     was_calibrate_pressed = False
+    was_deadman_pressed = False
+    motion_active = False
+    holding = False
+    motion_blocked = False
     next_verbose_s = 0.0
+
+    def freeze_at_current_pose(reason: str) -> EndPose:
+        """Stop the arm at feedback position and reset the rate limiter there."""
+        nonlocal holding
+        driver.hold()
+        pose = driver.read_end_pose() or driver.last_pose
+        safety.reset(pose.xyz_m)
+        orientation_safety.reset(pose.rpy_deg)
+        holding = True
+        if args.verbose:
+            print(f"[teleop] holding at measured pose ({reason})")
+        return pose
+
+    def anchor_motion(controller_pose: np.ndarray, reason: str) -> None:
+        """Create a zero-error clutch point from the current controller and arm poses."""
+        nonlocal vr_home, piper_home, rpy_home, motion_active, holding, ik_seed
+        pose = driver.read_end_pose() or driver.last_pose
+        vr_home = controller_pose.copy()
+        piper_home = pose.xyz_m.copy()
+        rpy_home = pose.rpy_deg.copy() if config.get("hold_orientation", True) else np.asarray(
+            config.get("default_rpy_deg") or pose.rpy_deg, dtype=float
+        )
+        safety.reset(piper_home)
+        orientation_safety.reset(rpy_home)
+        if kinematics is not None:
+            result = kinematics.solve(piper_home, rpy_home, ik_seed)
+            if result.success:
+                ik_seed = result.joints_rad
+            else:
+                print("WARNING: URDF model cannot match the measured endpoint at this clutch point.")
+        motion_active = True
+        holding = False
+        print(f"Teleop armed ({reason}): endpoint_m={piper_home.round(4).tolist()}")
 
     def maybe_print_verbose(
         *,
@@ -145,18 +197,31 @@ def main() -> int:
             controller_xyz = None
 
             if calibrate_pressed and not was_calibrate_pressed:
-                vr_home = quest.get_controller_pose(side)
-                current_pose = driver.read_end_pose()
+                current_vr = quest.get_controller_pose(side)
+                controller_xyz = current_vr[:3, 3]
+                # Calibration is deliberately disarmed.  The grip must be released
+                # and pressed again, preventing an already-held grip from moving the
+                # arm with a stale controller offset.
+                current_pose = freeze_at_current_pose("calibration")
+                vr_home = current_vr.copy()
                 piper_home = current_pose.xyz_m.copy()
-                if config.get("hold_orientation", True):
-                    rpy_home = current_pose.rpy_deg.copy()
-                else:
-                    rpy_home = np.asarray(config.get("default_rpy_deg") or current_pose.rpy_deg, dtype=float)
-                safety.last_command_m = piper_home.copy()
-                safety.last_time_s = time.monotonic()
+                rpy_home = current_pose.rpy_deg.copy() if config.get("hold_orientation", True) else np.asarray(
+                    config.get("default_rpy_deg") or current_pose.rpy_deg, dtype=float
+                )
                 calibrated = True
-                print(f"Calibrated: piper_home_m={piper_home.round(4).tolist()} rpy_deg={rpy_home.round(2).tolist()}")
+                motion_active = False
+                motion_blocked = False
+                was_deadman_pressed = deadman
+                print(
+                    f"Calibrated: piper_home_m={piper_home.round(4).tolist()} rpy_deg={rpy_home.round(2).tolist()}. "
+                    "Release then press the deadman to arm motion."
+                )
             was_calibrate_pressed = calibrate_pressed
+
+            # Do not process the calibrate press as a motion command in this cycle.
+            if calibrate_pressed:
+                time.sleep(period_s)
+                continue
 
             if not calibrated:
                 maybe_print_verbose(
@@ -171,6 +236,12 @@ def main() -> int:
                 continue
 
             if tracking_is_stale(quest.last_update_s, safety.stale_timeout_s):
+                if motion_active or not holding:
+                    freeze_at_current_pose("tracking stale")
+                motion_active = False
+                # A controller held through a tracking outage must be released and
+                # pressed again before it can command motion.
+                was_deadman_pressed = deadman
                 maybe_print_verbose(
                     buttons=buttons,
                     calibrated_state=calibrated,
@@ -183,6 +254,11 @@ def main() -> int:
                 continue
 
             if not deadman:
+                if motion_active or not holding:
+                    freeze_at_current_pose("deadman released")
+                motion_active = False
+                motion_blocked = False
+                was_deadman_pressed = False
                 current_vr = quest.get_controller_pose(side)
                 controller_xyz = current_vr[:3, 3]
                 maybe_print_verbose(
@@ -198,9 +274,56 @@ def main() -> int:
 
             current_vr = quest.get_controller_pose(side)
             controller_xyz = current_vr[:3, 3]
+            if motion_blocked:
+                maybe_print_verbose(
+                    buttons=buttons,
+                    calibrated_state=calibrated,
+                    deadman_state=deadman,
+                    calibrate_state=calibrate_pressed,
+                    controller_xyz=controller_xyz,
+                    skipped_reason="urdf_ik_unreachable_release_deadman",
+                )
+                time.sleep(period_s)
+                continue
+            if not was_deadman_pressed:
+                # Clutch semantics: every new grip press starts from the arm's
+                # actual current pose, so previous controller motion is never replayed.
+                anchor_motion(current_vr, "deadman pressed")
+                was_deadman_pressed = True
+                maybe_print_verbose(
+                    buttons=buttons,
+                    calibrated_state=calibrated,
+                    deadman_state=deadman,
+                    calibrate_state=calibrate_pressed,
+                    controller_xyz=controller_xyz,
+                    skipped_reason="armed_this_cycle",
+                )
+                time.sleep(period_s)
+                continue
+
+            was_deadman_pressed = True
             target = target_from_home(vr_home, current_vr, piper_home, mapping, scale)
             safe_target = safety.limit_step(target)
-            driver.send_end_pose(safe_target, rpy_home)
+            target_rpy = (
+                orientation_target_from_home(
+                    vr_home, current_vr, rpy_home, mapping, orientation_scale, max_orientation_delta_deg
+                )
+                if orientation_enabled
+                else rpy_home
+            )
+            safe_rpy = orientation_safety.limit_step(target_rpy)
+            if kinematics is not None:
+                result = kinematics.solve(safe_target, safe_rpy, ik_seed)
+                if not result.success:
+                    freeze_at_current_pose(
+                        f"URDF IK unreachable (position error {result.position_error_m:.3f} m, "
+                        f"orientation error {result.orientation_error_deg:.1f} deg)"
+                    )
+                    motion_active = False
+                    motion_blocked = True
+                    continue
+                ik_seed = result.joints_rad
+            driver.send_end_pose(safe_target, safe_rpy)
             maybe_print_verbose(
                 buttons=buttons,
                 calibrated_state=calibrated,

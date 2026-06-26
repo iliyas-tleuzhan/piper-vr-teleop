@@ -1,25 +1,39 @@
 can: "can0"
 hz: 20.0
-speed_percent: 10
+speed_percent: 20
 
 side: "right"
 deadman_button: "rightGrip"
 calibrate_button: "A"
 gripper_enabled: false
 
-scale: 0.35
-max_speed_m_s: 0.08
+# A 10 cm controller motion produces an 8 cm endpoint motion, capped at 15 cm/s.
+scale: 0.80
+max_speed_m_s: 0.15
 
 workspace_min_m: [0.18, -0.32, 0.08]
 workspace_max_m: [0.62, 0.32, 0.55]
 
 axis_mapping:
-  piper_x: "+vr_x"
-  piper_y: "+vr_y"
-  piper_z: "+vr_z"
+  # Controller-local axes: forward -> Piper forward, right -> Piper right,
+  # up -> Piper up.  Change only if the physical robot base uses another convention.
+  translation_frame: "controller_home"
+  piper_x: "-vr_z"
+  piper_y: "-vr_x"
+  piper_z: "+vr_y"
 
+# Controller rotation is relative to the grip/clutch point, rate-limited and bounded.
+orientation_enabled: true
+orientation_scale: 1.0
+max_angular_speed_deg_s: 60.0
+max_orientation_delta_deg: [45.0, 45.0, 60.0]
 hold_orientation: true
 default_rpy_deg: null
+
+# URDF-based feasibility check. It rejects unreachable Cartesian commands before
+# they reach Piper firmware; it does not yet replace firmware endpoint control.
+urdf_guard_enabled: true
+urdf_path: "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"
 
 quest:
   connection: "usb"
