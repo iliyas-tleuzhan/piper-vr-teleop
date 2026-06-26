@@ -22,27 +22,45 @@ def _line(axis, points: np.ndarray, *, color: str, width: float, style: str = "-
 
 
 def _controller_and_hand(axis, position: np.ndarray, yaw: float):
-    """Stylized hand gripping a Quest controller, drawn with simple 3D geometry."""
+    """Render a proportioned Quest-style controller held in an articulated hand."""
     rotation = np.array([[np.cos(yaw), -np.sin(yaw), 0], [np.sin(yaw), np.cos(yaw), 0], [0, 0, 1]])
 
     def place(points: list[list[float]]) -> np.ndarray:
         return np.asarray(points) @ rotation.T + position
 
     artists = []
-    # Quest controller body and tracking ring.
-    body = place([[-.035, -.018, -.065], [.035, -.018, -.065], [.035, .018, -.065], [-.035, .018, -.065], [-.035, -.018, -.065]])
-    artists.append(_line(axis, body, color="#1C2536", width=5))
-    ring_angle = np.linspace(0, 2 * np.pi, 28)
-    ring = place(np.column_stack((.065 * np.cos(ring_angle), .018 * np.sin(ring_angle), .065 + .045 * np.sin(ring_angle))).tolist())
-    artists.append(_line(axis, ring, color="#88D8F7", width=2))
-    # Palm, wrist, and four fingers curl around the controller body.
-    wrist = place([[0, 0, -.16], [0, 0, -.095]])
-    artists.append(_line(axis, wrist, color="#E8A07A", width=12))
-    palm = place([[-.045, 0, -.085], [.045, 0, -.085]])
-    artists.append(_line(axis, palm, color="#E8A07A", width=14))
-    for offset in (-.032, -.011, .011, .032):
-        finger = place([[offset, -.006, -.085], [offset * 1.1, -.035, -.03], [offset * .8, -.024, .018]])
-        artists.append(_line(axis, finger, color="#F2B38C", width=5))
+
+    def ellipsoid(center: list[float], radius: list[float], color: str, resolution: int = 10) -> None:
+        u, v = np.mgrid[0 : 2 * np.pi : complex(resolution * 2), 0 : np.pi : complex(resolution)]
+        local = np.stack((radius[0] * np.cos(u) * np.sin(v), radius[1] * np.sin(u) * np.sin(v), radius[2] * np.cos(v)), axis=-1)
+        world = local @ rotation.T + place([center])[0]
+        artists.append(axis.plot_surface(world[:, :, 0], world[:, :, 1], world[:, :, 2], color=color, linewidth=0, shade=True))
+
+    # Quest 3 Touch-style body, handle, trigger, thumbstick, buttons, and halo.
+    ellipsoid([0, 0, -.01], [.052, .034, .065], "#E8EBEF")
+    ellipsoid([0, .002, -.105], [.031, .027, .085], "#D8DDE3")
+    ellipsoid([.026, -.033, -.02], [.010, .008, .032], "#1E293B", 7)  # trigger
+    ellipsoid([-.012, -.034, .025], [.014, .008, .014], "#334155", 7)  # thumbstick
+    ellipsoid([.018, -.034, .025], [.007, .006, .007], "#5D6675", 7)
+    ellipsoid([.035, -.034, .008], [.007, .006, .007], "#5D6675", 7)
+    u, v = np.mgrid[0 : 2 * np.pi : 32j, 0 : 2 * np.pi : 8j]
+    major, minor = .069, .006
+    local_ring = np.stack(((major + minor * np.cos(v)) * np.cos(u), minor * np.sin(v), .070 + (major + minor * np.cos(v)) * np.sin(u)), axis=-1)
+    ring = local_ring @ rotation.T + position
+    artists.append(axis.plot_surface(ring[:, :, 0], ring[:, :, 1], ring[:, :, 2], color="#B9F0FF", linewidth=0, shade=True))
+
+    # Hand: palm/wrist volumes and finger bones with rounded knuckles.
+    ellipsoid([0, .045, -.115], [.065, .034, .075], "#E7A17D")
+    ellipsoid([0, .062, -.205], [.042, .028, .075], "#D99170")
+    for offset in (-.037, -.012, .012, .037):
+        finger = place([[offset, .035, -.10], [offset * .95, .008, -.045], [offset * .78, -.005, .008]])
+        artists.append(_line(axis, finger, color="#F0B18C", width=7))
+        for point in finger[1:]:
+            artists.append(axis.scatter(*point, s=22, c="#F5BE9A", depthshade=True))
+    thumb = place([[-.060, .030, -.13], [-.071, -.014, -.06], [-.045, -.030, -.01]])
+    artists.append(_line(axis, thumb, color="#F0B18C", width=8))
+    for point in thumb[1:]:
+        artists.append(axis.scatter(*point, s=26, c="#F5BE9A", depthshade=True))
     return artists
 
 
