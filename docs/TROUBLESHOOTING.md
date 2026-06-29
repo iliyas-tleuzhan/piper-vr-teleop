@@ -172,6 +172,23 @@ max_speed_m_s: 0.04
 speed_percent: 5
 ```
 
+## Piper is shaky while the controller is steady
+
+Use translation-only control first:
+
+```yaml
+orientation_enabled: false
+```
+
+Increase the controller deadband if the arm still hunts in place:
+
+```yaml
+position_deadband_m: 0.005
+position_filter_alpha: 0.25
+```
+
+If the arm feels too delayed, reduce `position_deadband_m` or increase `position_filter_alpha`.
+
 ## Piper jumps after calibration
 
 Do not hold the deadman during calibration. Calibrate while the controller is steady. Lower `max_speed_m_s`.

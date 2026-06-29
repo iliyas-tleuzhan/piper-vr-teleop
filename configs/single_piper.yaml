@@ -11,6 +11,13 @@ gripper_enabled: false
 scale: 0.80
 max_speed_m_s: 0.15
 
+# Quest controller tracking has millimeter-scale jitter.  Filter small changes
+# before they reach Piper endpoint IK so the arm does not hunt while your hand is
+# steady.
+position_filter_enabled: true
+position_deadband_m: 0.003
+position_filter_alpha: 0.35
+
 workspace_min_m: [0.18, -0.32, 0.08]
 workspace_max_m: [0.62, 0.32, 0.55]
 
@@ -23,10 +30,15 @@ axis_mapping:
   piper_z: "+vr_y"
 
 # Controller rotation is relative to the grip/clutch point, rate-limited and bounded.
-orientation_enabled: true
+# Keep this disabled until translation feels correct; wrist-tracking noise can
+# otherwise make endpoint IK look shaky.
+orientation_enabled: false
 orientation_scale: 1.0
 max_angular_speed_deg_s: 60.0
 max_orientation_delta_deg: [45.0, 45.0, 60.0]
+orientation_filter_enabled: true
+orientation_deadband_deg: 2.0
+orientation_filter_alpha: 0.25
 hold_orientation: true
 default_rpy_deg: null
 

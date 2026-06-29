@@ -13,7 +13,7 @@ from .buttons import analog_value, is_pressed
 from .piper_driver import PiperDriver
 from .piper_kinematics import PiperKinematics
 from .quest_reader import QuestReader
-from .safety import OrientationLimiter, SafetyLimiter, tracking_is_stale
+from .safety import OrientationLimiter, SafetyLimiter, SignalFilter, tracking_is_stale
 from .vr_mapping import AxisMapping, orientation_target_from_home, target_from_home
 
 
@@ -95,9 +95,19 @@ def main() -> int:
     driver.connect()
     safety = SafetyLimiter.from_config(config)
     orientation_safety = OrientationLimiter(float(config.get("max_angular_speed_deg_s", 60.0)))
+    position_filter = SignalFilter(
+        deadband=float(config.get("position_deadband_m", 0.003)),
+        alpha=float(config.get("position_filter_alpha", 0.35)),
+        enabled=bool(config.get("position_filter_enabled", True)),
+    )
+    orientation_filter = SignalFilter(
+        deadband=float(config.get("orientation_deadband_deg", 2.0)),
+        alpha=float(config.get("orientation_filter_alpha", 0.25)),
+        enabled=bool(config.get("orientation_filter_enabled", True)),
+    )
     mapping = AxisMapping.from_config(config.get("axis_mapping"))
     scale = float(config.get("scale", 1.0))
-    orientation_enabled = bool(config.get("orientation_enabled", True))
+    orientation_enabled = bool(config.get("orientation_enabled", False))
     orientation_scale = float(config.get("orientation_scale", 1.0))
     max_orientation_delta_deg = np.asarray(config.get("max_orientation_delta_deg", [45.0, 45.0, 60.0]), dtype=float)
     urdf_guard_enabled = bool(config.get("urdf_guard_enabled", True))
@@ -126,6 +136,8 @@ def main() -> int:
         pose = driver.read_end_pose() or driver.last_pose
         safety.reset(pose.xyz_m)
         orientation_safety.reset(pose.rpy_deg)
+        position_filter.reset(pose.xyz_m)
+        orientation_filter.reset(pose.rpy_deg)
         holding = True
         if args.verbose:
             print(f"[teleop] holding at measured pose ({reason})")
@@ -142,6 +154,8 @@ def main() -> int:
         )
         safety.reset(piper_home)
         orientation_safety.reset(rpy_home)
+        position_filter.reset(piper_home)
+        orientation_filter.reset(rpy_home)
         if kinematics is not None:
             result = kinematics.solve(piper_home, rpy_home, ik_seed)
             if result.success:
@@ -303,7 +317,8 @@ def main() -> int:
 
             was_deadman_pressed = True
             target = target_from_home(vr_home, current_vr, piper_home, mapping, scale)
-            safe_target = safety.limit_step(target)
+            filtered_target = position_filter.apply(target)
+            safe_target = safety.limit_step(filtered_target)
             target_rpy = (
                 orientation_target_from_home(
                     vr_home, current_vr, rpy_home, mapping, orientation_scale, max_orientation_delta_deg
@@ -311,7 +326,8 @@ def main() -> int:
                 if orientation_enabled
                 else rpy_home
             )
-            safe_rpy = orientation_safety.limit_step(target_rpy)
+            filtered_rpy = orientation_filter.apply(target_rpy)
+            safe_rpy = orientation_safety.limit_step(filtered_rpy)
             if kinematics is not None:
                 result = kinematics.solve(safe_target, safe_rpy, ik_seed)
                 if not result.success:

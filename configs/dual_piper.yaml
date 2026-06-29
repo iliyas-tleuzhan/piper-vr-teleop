@@ -18,8 +18,15 @@ hz: 20.0
 speed_percent: 10
 scale: 0.35
 max_speed_m_s: 0.08
+position_filter_enabled: true
+position_deadband_m: 0.003
+position_filter_alpha: 0.35
 gripper_enabled: false
 hold_orientation: true
+orientation_enabled: false
+orientation_filter_enabled: true
+orientation_deadband_deg: 2.0
+orientation_filter_alpha: 0.25
 default_rpy_deg: null
 
 axis_mapping:

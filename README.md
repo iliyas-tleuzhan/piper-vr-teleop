@@ -135,7 +135,7 @@ python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --can can0 -
 - `A` calibrates the VR home pose to the current Piper end-effector pose.
 - Release, then press and hold `rightGrip` to arm motion. Each new press is a clutch point, so controller motion while released is ignored.
 - Releasing the deadman commands the measured current endpoint pose, stopping the arm instead of allowing it to finish an old target.
-- While the deadman is held, controller rotation changes endpoint roll/pitch/yaw. It is limited to ±45° roll/pitch, ±60° yaw, and 60°/s by default.
+- By default, the endpoint keeps its calibrated orientation while the controller moves the arm in XYZ. Set `orientation_enabled: true` only after translation is tuned; controller rotation is then limited to ±45° roll/pitch, ±60° yaw, and 60°/s.
 - Right trigger can control the gripper when `gripper_enabled: true`.
 - `Ctrl+C` exits cleanly and sends a hold command.
 
@@ -146,6 +146,7 @@ All controls are configurable in [configs/single_piper.yaml](configs/single_pipe
 - The robot never moves before calibration.
 - The robot never moves unless the deadman is held.
 - Workspace limits clamp the target position.
+- Small Quest tracking jitter is removed with a configurable deadband and smoothing filter before endpoint commands are sent.
 - Cartesian speed limiting prevents large endpoint steps.
 - Tracking loss or stale Quest data causes a hold.
 - A constrained IK guard built from the bundled Piper URDF rejects targets outside the six joint limits before they are sent to the firmware. Use `--no-urdf-guard` only for diagnosis.

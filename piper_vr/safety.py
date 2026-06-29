@@ -59,6 +59,43 @@ class SafetyLimiter:
         return self.last_command_m.copy()
 
 
+@dataclass
+class SignalFilter:
+    """Suppress small tracking jitter and smooth commanded target changes."""
+
+    deadband: float
+    alpha: float
+    enabled: bool = True
+    value: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        if self.deadband < 0:
+            raise ValueError("deadband must be non-negative")
+        if not 0.0 < self.alpha <= 1.0:
+            raise ValueError("alpha must be in the range (0, 1]")
+
+    def reset(self, value: np.ndarray) -> np.ndarray:
+        self.value = np.asarray(value, dtype=float).copy()
+        return self.value.copy()
+
+    def apply(self, target: np.ndarray) -> np.ndarray:
+        target = np.asarray(target, dtype=float)
+        if not self.enabled:
+            return self.reset(target)
+        if self.value is None:
+            return self.reset(target)
+
+        delta = target - self.value
+        distance = float(np.linalg.norm(delta))
+        if distance <= self.deadband:
+            return self.value.copy()
+
+        if self.deadband > 0.0:
+            delta = delta * ((distance - self.deadband) / distance)
+        self.value = self.value + self.alpha * delta
+        return self.value.copy()
+
+
 def tracking_is_stale(last_update_s: float | None, timeout_s: float) -> bool:
     if last_update_s is None:
         return True
