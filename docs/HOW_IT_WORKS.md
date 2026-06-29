@@ -1,50 +1,27 @@
 # How It Works
 
-The Quest APK streams controller transforms and button states through Android logs. The Python reader follows the `oculus_reader` style and calls:
-
-```python
-transformations, buttons = oculus_reader.get_transformations_and_buttons()
-```
-
-The teleop loop uses that data in four stages.
-
-## 1. Read Quest State
-
-`QuestReader` returns a 4x4 transform for the selected controller and a normalized button dictionary.
-
-## 2. Calibrate Home
-
-When the calibrate button is pressed, the software stores:
-
-- Current Quest controller transform
-- Current Piper endpoint position
-- Current Piper endpoint orientation, unless a fixed orientation is configured
-
-This makes future controller motion relative to a known robot pose.
-
-## 3. Map Motion
-
-Controller translation and rotation deltas are scaled and mapped into Piper XYZ/RPY target motion. Both are relative to the grip/clutch point; axis signs and assignments are configured in YAML. Orientation motion has separate angular speed and angle limits.
-
-## 4. Apply Safety
-
-The target is clamped to the configured workspace and limited by maximum Cartesian speed. If tracking is stale or the deadman is released, the command is held.
-
-## 5. Command Piper Endpoint Control
-
-The final target is converted from meters and degrees into Piper command units, then sent through:
-
-```python
-arm.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
-```
-
-Piper internal IK converts the endpoint command to joint movement.
+The default path is:
 
 ```text
-Quest controller pose
--> relative target mapping
--> workspace and speed safety
--> Piper EndPoseCtrl
--> Piper internal IK
--> joint movement
+Quest APK -> ADB/logcat -> oculus_reader -> QuestSample -> TeleopSession -> SafetyLimiter -> PiperDriver -> EndPoseCtrl
 ```
+
+`QuestSample` keeps source-native OpenXR-like 4x4 controller matrices and button maps. Axis mapping happens later through `piper_vr/vr_mapping.py`, using the YAML `axis_mapping` rules.
+
+`TeleopSession` owns the state machine:
+
+- `WAITING_FOR_DEVICE`
+- `WAITING_FOR_CALIBRATION`
+- `READY_IDLE`
+- `ACTIVE`
+- `HOLDING`
+- `FAULT`
+
+Calibration snapshots the current controller transform and the measured Piper endpoint pose. Motion is disarmed immediately after calibration, so the operator must release and re-press the deadman. Every new deadman press creates a fresh clutch anchor.
+
+The Piper driver uses meters and degrees internally. It converts only at the SDK boundary:
+
+- XYZ: `0.001 mm`
+- RX/RY/RZ: `0.001 degrees`
+
+The optional ROS transport is a placeholder for future ROS-topic Quest apps. WebRTC/browser XR stacks are better suited to richer telepresence systems and are not the primary first-working path here.

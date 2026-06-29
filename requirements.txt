@@ -2,5 +2,9 @@ numpy
 PyYAML
 piper-sdk
 pure-python-adb
+pytest
+# Optional diagnostics/simulation helpers.
 rospkg
 meshcat
+# Optional Quest reader install:
+#   scripts/install_oculus_reader.sh

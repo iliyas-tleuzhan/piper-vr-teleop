@@ -12,13 +12,15 @@ import yaml
 DEFAULT = {
     "can": "can0",
     "hz": 30.0,
-    "speed_percent": 20,
+    "speed_percent": 5,
     "side": "right",
     "deadman_button": "rightGrip",
     "calibrate_button": "A",
     "gripper_enabled": False,
-    "scale": 0.80,
-    "max_speed_m_s": 0.15,
+    "scale": 0.40,
+    "max_speed_m_s": 0.05,
+    "max_position_jump_m": 0.03,
+    "stale_timeout_s": 0.25,
     "position_filter_enabled": True,
     "position_deadband_m": 0.003,
     "position_filter_alpha": 0.35,
@@ -39,9 +41,9 @@ DEFAULT = {
     "orientation_deadband_deg": 2.0,
     "orientation_filter_alpha": 0.25,
     "default_rpy_deg": None,
-    "urdf_guard_enabled": True,
+    "urdf_guard_enabled": False,
     "urdf_path": "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf",
-    "quest": {"connection": "usb", "ip_address": None},
+    "quest": {"transport": "adb_logcat", "connection": "usb", "ip_address": None},
 }
 
 
@@ -51,8 +53,8 @@ def main() -> int:
     parser.add_argument("--can", default="can0")
     parser.add_argument("--side", choices=("left", "right"), default="right")
     parser.add_argument("--quest-ip")
-    parser.add_argument("--scale", type=float, default=0.80)
-    parser.add_argument("--max-speed", type=float, default=0.15)
+    parser.add_argument("--scale", type=float, default=0.40)
+    parser.add_argument("--max-speed", type=float, default=0.05)
     args = parser.parse_args()
 
     config = DEFAULT | {
@@ -64,7 +66,7 @@ def main() -> int:
         "max_speed_m_s": args.max_speed,
     }
     if args.quest_ip:
-        config["quest"] = {"connection": "wireless", "ip_address": args.quest_ip}
+        config["quest"] = {"transport": "adb_logcat", "connection": "wireless", "ip_address": args.quest_ip}
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

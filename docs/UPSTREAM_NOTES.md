@@ -1,15 +1,12 @@
 # Upstream Notes
 
-This repository is based on and refactored from ideas in AgileX Robotics `questVR_ws`.
+This repository is informed by `agilexrobotics/questVR_ws`, especially the Quest APK, ADB/logcat reader workflow, and single/dual Piper architecture.
 
-Relevant upstream areas include:
+`questVR_ws` is treated as an architecture reference unless its license is clarified. No unlicensed text or code from it should be copied verbatim into this repository.
 
-- `oculus_reader`, which reads Quest controller transforms and buttons.
-- The Quest teleop APK workflow.
-- Piper ROS files.
-- Single Piper teleoperation launch and script structure.
-- Dual Piper teleoperation launch and script structure.
+Reusable licensed upstreams:
 
-The root of the upstream repository did not provide a broad repository license during inspection. For that reason, this project uses the upstream repository as a technical reference and provides a clean English implementation instead of copying large VR teleoperation source blocks.
+- `agilexrobotics/piper_sdk`: MIT license, used through the installed `piper-sdk` package.
+- `rail-berkeley/oculus_reader`: Apache-2.0 license, used as the primary Quest reader API.
 
-The `Piper_ros` subfolder in the upstream repository has its own license. Review upstream licensing directly before copying any upstream files into this project.
+The current code reimplements the host-side transport/session/control structure in English and keeps the first-working Piper endpoint-control path explicit.

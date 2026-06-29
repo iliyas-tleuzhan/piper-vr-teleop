@@ -79,7 +79,8 @@ class PiperDriver:
 
         print("[Piper] Enabling all motors...")
         for _ in range(5):
-            self.arm.EnableArm(7, 0x02)  # 7 = all motors, 0x02 = enable
+            # EnableArm(7, 0x02): 7 selects all motors, 0x02 enables them.
+            self.arm.EnableArm(7, 0x02)
             time.sleep(0.2)
 
     def set_move_p_mode(self) -> None:
@@ -92,7 +93,8 @@ class PiperDriver:
         print("[Piper] Setting MOVE P endpoint mode...")
         for _ in range(5):
             if hasattr(self.arm, "ModeCtrl"):
-                # ctrl_mode=0x01 CAN control, move_mode=0x00 MOVE P endpoint mode
+                # ModeCtrl(0x01, 0x00, speed, 0x00): CAN command control
+                # plus MOVE P endpoint mode at the requested speed percentage.
                 self.arm.ModeCtrl(0x01, 0x00, self.speed_percent, 0x00)
             elif hasattr(self.arm, "MotionCtrl_2"):
                 self.arm.MotionCtrl_2(0x01, 0x00, self.speed_percent, 0x00)
@@ -149,6 +151,8 @@ class PiperDriver:
             degrees_to_piper_rpy(float(rpy_deg[1])),
             degrees_to_piper_rpy(float(rpy_deg[2])),
         ]
+        # Host code uses meters and degrees internally. EndPoseCtrl expects
+        # XYZ in 0.001 mm and RX/RY/RZ in 0.001 degrees.
         # Keep commanded and measured poses separate.  Treating a requested pose as
         # feedback makes a deadman hold command chase an old target while the arm is
         # still moving.

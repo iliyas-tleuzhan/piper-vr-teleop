@@ -10,8 +10,10 @@ dependencies:
   - pip:
       - piper-sdk
       - pure-python-adb
+      - pytest
       - rospkg
       - meshcat
       - imageio-ffmpeg
       - trimesh
       - pycollada
+      # Install oculus_reader separately with scripts/install_oculus_reader.sh.

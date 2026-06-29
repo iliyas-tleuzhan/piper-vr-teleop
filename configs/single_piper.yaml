@@ -1,19 +1,17 @@
 can: "can0"
-hz: 20.0
-speed_percent: 20
+hz: 30.0
+speed_percent: 5
 
 side: "right"
 deadman_button: "rightGrip"
 calibrate_button: "A"
 gripper_enabled: false
 
-# A 10 cm controller motion produces an 8 cm endpoint motion, capped at 15 cm/s.
-scale: 0.80
-max_speed_m_s: 0.15
+scale: 0.40
+max_speed_m_s: 0.05
+max_position_jump_m: 0.03
+stale_timeout_s: 0.25
 
-# Quest controller tracking has millimeter-scale jitter.  Filter small changes
-# before they reach Piper endpoint IK so the arm does not hunt while your hand is
-# steady.
 position_filter_enabled: true
 position_deadband_m: 0.003
 position_filter_alpha: 0.35
@@ -22,16 +20,11 @@ workspace_min_m: [0.18, -0.32, 0.08]
 workspace_max_m: [0.62, 0.32, 0.55]
 
 axis_mapping:
-  # Controller-local axes: forward -> Piper forward, right -> Piper right,
-  # up -> Piper up.  Change only if the physical robot base uses another convention.
   translation_frame: "controller_home"
   piper_x: "-vr_z"
   piper_y: "-vr_x"
   piper_z: "+vr_y"
 
-# Controller rotation is relative to the grip/clutch point, rate-limited and bounded.
-# Keep this disabled until translation feels correct; wrist-tracking noise can
-# otherwise make endpoint IK look shaky.
 orientation_enabled: false
 orientation_scale: 1.0
 max_angular_speed_deg_s: 60.0
@@ -42,11 +35,10 @@ orientation_filter_alpha: 0.25
 hold_orientation: true
 default_rpy_deg: null
 
-# URDF-based feasibility check. It rejects unreachable Cartesian commands before
-# they reach Piper firmware; it does not yet replace firmware endpoint control.
-urdf_guard_enabled: true
+urdf_guard_enabled: false
 urdf_path: "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"
 
 quest:
+  transport: "adb_logcat"
   connection: "usb"
   ip_address: null

@@ -1,93 +1,81 @@
-"""Quest reader wrapper compatible with the upstream oculus_reader approach."""
+"""High-level Quest reader facade over pluggable transports."""
 
 from __future__ import annotations
 
-import importlib
-import time
 from typing import Any
 
 import numpy as np
 
 from .buttons import normalize_buttons
+from .transports.adb_logcat import SimulatedQuestReader
+from .transports.factory import create_transport
+from .types import QuestSample
 
 
 class QuestReader:
-    """Small wrapper around an object exposing get_transformations_and_buttons()."""
-
-    SIDE_KEYS = {"right": ("r", "right"), "left": ("l", "left")}
+    """Small compatibility wrapper used by scripts and teleop loops."""
 
     def __init__(
         self,
+        transport: str = "adb_logcat",
+        connection: str = "usb",
         ip_address: str | None = None,
         reader: Any | None = None,
         start: bool = True,
         install_apk: bool = False,
         simulate_on_missing: bool = False,
     ) -> None:
-        self._reader = reader or self._create_oculus_reader(ip_address, start, install_apk, simulate_on_missing)
-        self._last_update_s: float | None = None
-        self._last_transforms: dict[str, np.ndarray] = {}
-        self._last_buttons: dict[str, Any] = normalize_buttons(None)
+        self.transport_name = transport
+        self.transport = create_transport(
+            transport,
+            connection=connection,
+            ip_address=ip_address,
+            reader=reader,
+            start=False,
+            install_apk=install_apk,
+            simulate_on_missing=simulate_on_missing,
+        )
+        if start:
+            self.start()
 
     @property
     def last_update_s(self) -> float | None:
-        return self._last_update_s
+        return getattr(self.transport, "last_update_s", None)
 
-    def _create_oculus_reader(
-        self,
-        ip_address: str | None,
-        start: bool,
-        install_apk: bool,
-        simulate_on_missing: bool,
-    ) -> Any:
-        try:
-            module = importlib.import_module("oculus_reader")
-        except ImportError:
-            if simulate_on_missing:
-                print("[DRY-RUN] oculus_reader is not installed; using simulated Quest data.")
-                return SimulatedQuestReader()
-            raise
-        reader_class = getattr(module, "OculusReader")
-        reader = reader_class(ip_address=ip_address, run=start)
-        if install_apk and hasattr(reader, "install"):
-            reader.install()
-        return reader
+    def start(self) -> None:
+        self.transport.start()
 
-    def poll(self) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
-        transformations, buttons = self._reader.get_transformations_and_buttons()
-        if transformations:
-            self._last_transforms = dict(transformations)
-            self._last_buttons = normalize_buttons(buttons)
-            self._last_update_s = time.monotonic()
-        return self._last_transforms, self._last_buttons
-
-    def get_controller_pose(self, side: str) -> np.ndarray:
-        transformations, _ = self.poll()
-        for key in self.SIDE_KEYS[side.lower()]:
-            if key in transformations:
-                return np.asarray(transformations[key], dtype=float)
-        raise RuntimeError(f"No {side} controller transform is available")
-
-    def get_buttons(self) -> dict[str, Any]:
-        _, buttons = self.poll()
-        return normalize_buttons(buttons)
+    def stop(self) -> None:
+        self.transport.stop()
 
     def is_ready(self) -> bool:
-        transformations, _ = self.poll()
-        return bool(transformations)
+        return self.transport.is_ready()
+
+    def get_sample(self) -> QuestSample | None:
+        return self.transport.get_latest()
+
+    def poll(self) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+        sample = self.get_sample()
+        if sample is None:
+            return {}, normalize_buttons(None)
+        return sample.transforms_openxr, normalize_buttons(sample.buttons)
+
+    def get_controller_pose(self, side: str) -> np.ndarray:
+        sample = self.get_sample()
+        if sample is None:
+            raise RuntimeError("No Quest sample is available")
+        side = side.lower()
+        if side not in sample.transforms_openxr:
+            raise RuntimeError(f"No {side} controller transform is available")
+        return np.asarray(sample.transforms_openxr[side], dtype=float)
+
+    def get_buttons(self) -> dict[str, Any]:
+        sample = self.get_sample()
+        return normalize_buttons(None if sample is None else sample.buttons)
+
+    def diagnostics(self) -> Any:
+        method = getattr(self.transport, "diagnostics", None)
+        return None if method is None else method()
 
 
-class SimulatedQuestReader:
-    """Small deterministic reader used only for no-hardware dry-run checks."""
-
-    def __init__(self) -> None:
-        self.started_s = time.monotonic()
-
-    def get_transformations_and_buttons(self) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
-        t = time.monotonic() - self.started_s
-        right = np.eye(4)
-        right[:3, 3] = [0.02 * np.sin(t), 0.02 * np.cos(t), 0.01 * np.sin(t * 0.5)]
-        left = np.eye(4)
-        left[:3, 3] = [-0.02 * np.sin(t), 0.02 * np.cos(t), 0.01 * np.sin(t * 0.5)]
-        buttons = normalize_buttons({"A": t < 1.0, "B": True, "rightGrip": (1.0,)})
-        return {"r": right, "l": left}, buttons
+__all__ = ["QuestReader", "SimulatedQuestReader"]

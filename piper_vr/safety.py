@@ -14,6 +14,7 @@ class SafetyLimiter:
     workspace_max_m: np.ndarray
     max_speed_m_s: float
     stale_timeout_s: float = 0.5
+    max_position_jump_m: float | None = None
     last_command_m: np.ndarray | None = None
     last_time_s: float | None = None
 
@@ -24,30 +25,47 @@ class SafetyLimiter:
             workspace_max_m=np.asarray(config["workspace_max_m"], dtype=float),
             max_speed_m_s=float(config["max_speed_m_s"]),
             stale_timeout_s=float(config.get("stale_timeout_s", 0.5)),
+            max_position_jump_m=float(config.get("max_position_jump_m", 0.03)),
         )
 
     def clamp_workspace(self, xyz_m: np.ndarray) -> np.ndarray:
         return np.minimum(np.maximum(np.asarray(xyz_m, dtype=float), self.workspace_min_m), self.workspace_max_m)
 
+    def clamp_workspace_with_reason(self, xyz_m: np.ndarray) -> tuple[np.ndarray, str]:
+        target = np.asarray(xyz_m, dtype=float)
+        clamped = self.clamp_workspace(target)
+        if not np.allclose(target, clamped):
+            return clamped, "workspace_clamped"
+        return clamped, "ok"
+
     def limit_step(self, target_m: np.ndarray, now_s: float | None = None) -> np.ndarray:
+        limited, _ = self.limit_step_with_reason(target_m, now_s)
+        return limited
+
+    def limit_step_with_reason(self, target_m: np.ndarray, now_s: float | None = None) -> tuple[np.ndarray, str]:
         now_s = time.monotonic() if now_s is None else now_s
-        target_m = self.clamp_workspace(target_m)
+        target_m, reason = self.clamp_workspace_with_reason(target_m)
         if self.last_command_m is None:
             self.last_command_m = target_m
             self.last_time_s = now_s
-            return target_m
+            return target_m.copy(), reason
 
         previous_time_s = now_s if self.last_time_s is None else self.last_time_s
         dt = max(now_s - previous_time_s, 1e-3)
         max_step = max(self.max_speed_m_s * dt, 0.0)
         delta = target_m - self.last_command_m
         distance = float(np.linalg.norm(delta))
+        if self.max_position_jump_m is not None and distance > self.max_position_jump_m:
+            max_step = min(max_step, float(self.max_position_jump_m))
+            reason = "max_position_jump_limited"
         if distance > max_step > 0.0:
             target_m = self.last_command_m + delta / distance * max_step
+            if reason == "ok":
+                reason = "speed_limited"
 
         self.last_command_m = self.clamp_workspace(target_m)
         self.last_time_s = now_s
-        return self.last_command_m
+        return self.last_command_m.copy(), reason
 
     def hold(self) -> np.ndarray | None:
         return None if self.last_command_m is None else self.last_command_m.copy()
