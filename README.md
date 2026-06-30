@@ -121,6 +121,37 @@ python3 -m piper_vr.vr_teleop \
   --no-log
 ```
 
+### Endpoint IK Direction Tuning
+
+Use these commands whenever endpoint directions feel inverted, weak, or clamped:
+
+```bash
+python3 scripts/calibrate_quest_endpoint_frame.py --side right
+python3 scripts/verify_endpoint_directions.py --config configs/generated_endpoint_ik_mapping.yaml
+python3 scripts/test_firmware_endpoint_from_quest.py --config configs/generated_endpoint_ik_mapping.yaml
+```
+
+- If forward/back is inverted, rerun calibration and check the generated `quest_endpoint_ik.axis_mapping.robot_x` sign.
+- If left/right is slow, increase `quest_endpoint_ik.scale_xyz[1]`.
+- If forward/back barely moves, check `quest_endpoint_ik.scale_xyz[0]`, `max_delta_from_home_m`, and the `--debug-ik` clamped axes.
+- If only some axes move, run teleop with `--debug-ik` and inspect `target_before_home_clamp`, `target_after_home_clamp`, `target_after_workspace_clamp`, and `clamped_axes`.
+
+After direction fixes, a faster lateral firmware endpoint test can use:
+
+```bash
+python3 -m piper_vr.vr_teleop \
+  --config configs/single_piper.yaml \
+  --mapping-config configs/generated_endpoint_ik_mapping.yaml \
+  --endpoint-ik \
+  --ik-backend firmware_endpoint \
+  --profile safe \
+  --endpoint-speed-percent 25 \
+  --ik-scale 0.5 \
+  --position-only \
+  --debug-ik \
+  --no-log
+```
+
 ## Controls
 
 - Right controller controls the single Piper by default.

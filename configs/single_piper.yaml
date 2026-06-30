@@ -117,9 +117,11 @@ quest_endpoint_ik:
   backend: "firmware_endpoint"
   urdf_path: "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"
   ee_frame: "link6"
+  control_frame: "hmd_yaw"
   position_only_default: true
   orientation_enabled: false
   scale: 0.5
+  scale_xyz: [0.6, 1.5, 0.5]
   orientation_scale: 0.3
   position_deadband_m: 0.003
   orientation_deadband_deg: 3.0
@@ -127,6 +129,7 @@ quest_endpoint_ik:
   orientation_filter_alpha: 0.35
   max_delta_from_home_m: [0.20, 0.20, 0.18]
   max_position_step_m: 0.01
+  max_position_step_m_xyz: [0.012, 0.025, 0.012]
   max_orientation_step_deg: 3.0
   workspace_min_m: [0.18, -0.35, 0.08]
   workspace_max_m: [0.65, 0.35, 0.60]
@@ -137,9 +140,19 @@ quest_endpoint_ik:
   max_tracking_error_deg: 12.0
   tracking_error_fault_frames: 10
   axis_mapping:
-    robot_x: "-quest_z"
+    robot_x: "+quest_z"
     robot_y: "-quest_x"
     robot_z: "+quest_y"
+  desired_endpoint_directions:
+    right:
+      robot_axis: "robot_y"
+      robot_sign: -1.0
+    up:
+      robot_axis: "robot_z"
+      robot_sign: 1.0
+    forward:
+      robot_axis: "robot_x"
+      robot_sign: 1.0
   rotation_mapping:
     robot_roll: "+quest_roll"
     robot_pitch: "+quest_pitch"

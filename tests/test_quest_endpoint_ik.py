@@ -57,6 +57,12 @@ def transform(xyz=(0.0, 0.0, 0.0), yaw_deg=0.0):
     return matrix
 
 
+def yaw_frame(deg):
+    angle = np.radians(deg)
+    c, s = np.cos(angle), np.sin(angle)
+    return np.array([[c, 0.0, s], [0.0, 1.0, 0.0], [-s, 0.0, c]], dtype=float)
+
+
 def sample(buttons=None, age=0.0, pose=None):
     return QuestSample(0.0, "test", {"right": transform() if pose is None else pose}, buttons or {}, age)
 
@@ -93,6 +99,25 @@ def test_controller_relative_transform_to_robot_delta_mapping():
     np.testing.assert_allclose(debug["controller_delta_xyz"], [0.1, 0.2, -0.3])
     np.testing.assert_allclose(debug["mapped_robot_delta_xyz"], [0.3, -0.1, 0.2])
     np.testing.assert_allclose(target_xyz, [0.7, -0.1, 0.4])
+
+
+def test_hmd_yaw_control_frame_stable_mapping():
+    cfg = config(axis_mapping={"robot_x": "+quest_z", "robot_y": "-quest_x", "robot_z": "+quest_y"})
+    _, _, debug = endpoint_target_from_controller(
+        transform(),
+        transform((1.0, 0.0, 0.0)),
+        np.array([0.3, 0.0, 0.2]),
+        np.zeros(3),
+        cfg,
+        control_frame=yaw_frame(90),
+    )
+    np.testing.assert_allclose(debug["controller_delta_xyz"], [0.0, 0.0, 1.0], atol=1e-6)
+
+
+def test_forward_physical_movement_positive_robot_x_default():
+    cfg = QuestEndpointIKConfig.from_config({"axis_mapping": {"robot_x": "+quest_z", "robot_y": "-quest_x", "robot_z": "+quest_y"}, "scale_xyz": [1, 1, 1]})
+    _, _, debug = endpoint_target_from_controller(transform(), transform((0.0, 0.0, 0.2)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    assert debug["mapped_robot_delta_xyz"][0] > 0
 
 
 def test_axis_mapping_signs_and_rotation_mapping():
@@ -132,6 +157,40 @@ def test_home_relative_clamp():
     target_xyz, _, debug = endpoint_target_from_controller(transform(), transform((0.5, 0.0, 0.0)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
     np.testing.assert_allclose(target_xyz, [0.4, 0.0, 0.2])
     assert debug["home_delta_clamped"] is True
+
+
+def test_scale_xyz_affects_only_requested_axis_and_y_is_larger():
+    cfg = config(scale=0.5, scale_xyz=[0.6, 1.5, 0.5], axis_mapping={"robot_x": "+quest_x", "robot_y": "+quest_y", "robot_z": "+quest_z"})
+    _, _, x_debug = endpoint_target_from_controller(transform(), transform((0.1, 0.0, 0.0)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    _, _, y_debug = endpoint_target_from_controller(transform(), transform((0.0, 0.1, 0.0)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    _, _, z_debug = endpoint_target_from_controller(transform(), transform((0.0, 0.0, 0.1)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    np.testing.assert_allclose(x_debug["scaled_robot_delta_xyz"], [0.03, 0.0, 0.0])
+    np.testing.assert_allclose(y_debug["scaled_robot_delta_xyz"], [0.0, 0.075, 0.0])
+    np.testing.assert_allclose(z_debug["scaled_robot_delta_xyz"], [0.0, 0.0, 0.025])
+    assert y_debug["scaled_robot_delta_xyz"][1] > x_debug["scaled_robot_delta_xyz"][0]
+
+
+def test_endpoint_target_debug_contains_clamp_stages_and_axes():
+    cfg = config(max_delta_from_home_m=[0.05, 0.05, 0.05], workspace_max_m=[0.34, 0.04, 0.24], axis_mapping={"robot_x": "+quest_x", "robot_y": "+quest_y", "robot_z": "+quest_z"})
+    _, _, debug = endpoint_target_from_controller(transform(), transform((0.2, 0.2, 0.2)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    assert "target_before_home_clamp" in debug
+    assert "target_after_home_clamp" in debug
+    assert "target_after_workspace_clamp" in debug
+    assert debug["clamped_axes"] == ["x", "y", "z"]
+
+
+def test_max_position_step_m_xyz_allows_y_faster_than_xz():
+    session = QuestEndpointIKSession(
+        side="right",
+        deadman_button="rightGrip",
+        calibrate_button="A",
+        config=config(max_position_step_m_xyz=[0.01, 0.03, 0.01], axis_mapping={"robot_x": "+quest_x", "robot_y": "+quest_y", "robot_z": "+quest_z"}),
+        stale_timeout_s=0.25,
+    )
+    session.filtered_xyz = np.array([0.3, 0.0, 0.2])
+    target = np.array([0.5, 0.2, 0.4])
+    step = np.clip(target - session.filtered_xyz, -session.config.max_position_step_m_xyz, session.config.max_position_step_m_xyz)
+    np.testing.assert_allclose(step, [0.01, 0.03, 0.01])
 
 
 def test_position_only_mode_ignores_orientation_delta():
@@ -189,6 +248,19 @@ def test_predict_endpoint_ik_script_help_works():
         env=env,
     )
     assert "Predict endpoint IK targets" in completed.stdout
+
+
+def test_verify_endpoint_directions_script_help_works():
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.getcwd() + os.pathsep + env.get("PYTHONPATH", "")
+    completed = subprocess.run(
+        [sys.executable, "scripts/verify_endpoint_directions.py", "--help"],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert "Verify endpoint IK direction signs" in completed.stdout
 
 
 def test_generated_endpoint_mapping_config_deep_merges():

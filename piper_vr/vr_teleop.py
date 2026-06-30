@@ -19,6 +19,7 @@ from .quest_endpoint_ik import QuestEndpointIKConfig, QuestEndpointIKSession
 from .quest_reader import QuestReader
 from .session import JointMimicSession
 from .relative_calibration import dominant_channel
+from .units import degrees_to_piper_rpy, meters_to_piper_xyz
 from .viz_broadcaster import QuestVizBroadcaster
 
 
@@ -58,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--endpoint-ik", action="store_true", help="shortcut for --control-mode quest_endpoint_ik")
     parser.add_argument("--ik-backend", choices=("firmware_endpoint", "host_ik_sdk_fk", "host_ik_urdf"), help="Quest endpoint IK backend")
     parser.add_argument("--ik-scale", type=float, help="Quest endpoint IK translation scale")
+    parser.add_argument("--endpoint-speed-percent", type=int, help="override Piper firmware endpoint MOVE P speed")
     parser.add_argument("--ik-orientation-scale", type=float, help="Quest endpoint IK orientation scale")
     parser.add_argument("--position-only", action="store_true", help="disable endpoint IK orientation control")
     parser.add_argument("--disable-orientation", action="store_true", help="disable endpoint IK orientation control")
@@ -192,11 +194,20 @@ def _print_ik_debug(result, driver: PiperDriver) -> None:
     measured = result.measured_joints or driver.read_joint_pose()
     print(
         "[debug-ik] "
+        f"control_frame={getattr(result, 'control_frame', None)} "
         f"state={result.state.value} "
         f"calibrated={result.calibrated} "
         f"controller_xyz={_format_array(result.controller_xyz, 4)} "
         f"controller_delta_xyz={_format_array(result.controller_delta_xyz, 4)} "
+        f"axis_mapping={result.axis_mapping} "
         f"mapped_robot_delta_xyz={_format_array(result.mapped_robot_delta_xyz, 4)} "
+        f"scale={getattr(result, 'scale', None)} "
+        f"scale_xyz={_format_array(getattr(result, 'scale_xyz', None), 3)} "
+        f"scaled_robot_delta_xyz={_format_array(result.scaled_robot_delta_xyz, 4)} "
+        f"target_before_home_clamp={_format_array(result.target_before_home_clamp, 4)} "
+        f"target_after_home_clamp={_format_array(result.target_after_home_clamp, 4)} "
+        f"target_after_workspace_clamp={_format_array(result.target_after_workspace_clamp, 4)} "
+        f"clamped_axes={result.clamped_axes} "
         f"target_xyz={_format_array(result.target_xyz, 4)} "
         f"controller_delta_rpy={_format_array(result.controller_delta_rpy_deg, 2)} "
         f"target_rpy={_format_array(result.target_rpy_deg, 2)} "
@@ -205,6 +216,9 @@ def _print_ik_debug(result, driver: PiperDriver) -> None:
         f"measured_joints={_format_array(None if measured is None else measured.joints_deg, 2)} "
         f"ik_error=({None if result.position_error_m is None else round(result.position_error_m, 4)},"
         f"{None if result.orientation_error_deg is None else round(result.orientation_error_deg, 2)}) "
+        f"firmware_xyz_mm={None if result.target_xyz is None else (np.asarray(result.target_xyz) * 1000).round(2).tolist()} "
+        f"firmware_xyz_raw={None if result.target_xyz is None else [meters_to_piper_xyz(float(v)) for v in result.target_xyz]} "
+        f"firmware_rpy_raw={None if result.target_rpy_deg is None else [degrees_to_piper_rpy(float(v)) for v in result.target_rpy_deg]} "
         f"action={result.action}:{result.reason}"
     )
 
@@ -301,7 +315,8 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
         ip_address=quest_config.get("ip_address"),
         simulate_on_missing=args.dry_run,
     )
-    driver = PiperDriver(can=config.get("can", "can0"), speed_percent=int(config.get("speed_percent", 5)), dry_run=args.dry_run)
+    speed_percent = int(args.endpoint_speed_percent if getattr(args, "endpoint_speed_percent", None) is not None and ik_config.backend == "firmware_endpoint" else config.get("speed_percent", 5))
+    driver = PiperDriver(can=config.get("can", "can0"), speed_percent=speed_percent, dry_run=args.dry_run)
     driver.connect(initial_mode="joint")
     measured = driver.read_joint_pose()
     if measured is not None:

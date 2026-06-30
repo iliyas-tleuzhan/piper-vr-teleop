@@ -10,6 +10,7 @@ import numpy as np
 
 from piper_vr.buttons import is_pressed
 from piper_vr.config import deep_merge, load_config
+from piper_vr.frame_calibration import ControlFrameConfig, get_control_frame
 from piper_vr.piper_driver import PiperDriver
 from piper_vr.piper_official_kinematics import create_official_fk
 from piper_vr.piper_kinematics import PiperKinematics
@@ -80,6 +81,7 @@ def main() -> int:
 
     print(f"Press {button} to set controller home. Robot home xyz={_fmt(robot_home_xyz)} rpy={_fmt(robot_home_rpy, 2)}")
     home = None
+    control_frame = None
     previous_pressed = False
     try:
         while True:
@@ -92,15 +94,21 @@ def main() -> int:
             pressed = is_pressed(sample.buttons, button)
             if pressed and not previous_pressed:
                 home = np.asarray(transform, dtype=float).copy()
+                control_frame = get_control_frame(sample, side, ControlFrameConfig(source=ik_config.control_frame), home)
                 print(f"HOME set at controller xyz={_fmt(home[:3, 3])}")
             previous_pressed = pressed
             if home is None:
                 time.sleep(0.05)
                 continue
-            target_xyz, target_rpy, debug = endpoint_target_from_controller(home, transform, robot_home_xyz, robot_home_rpy, ik_config)
+            target_xyz, target_rpy, debug = endpoint_target_from_controller(home, transform, robot_home_xyz, robot_home_rpy, ik_config, control_frame=control_frame)
             print(
+                f"control_frame={ik_config.control_frame} "
                 f"controller_delta_xyz={_fmt(debug['controller_delta_xyz'], 4)} "
                 f"mapped_robot_delta_xyz={_fmt(debug['mapped_robot_delta_xyz'], 4)} "
+                f"scaled_robot_delta_xyz={_fmt(debug['scaled_robot_delta_xyz'], 4)} "
+                f"target_before_home_clamp={_fmt(debug['target_before_home_clamp'], 4)} "
+                f"target_after_home_clamp={_fmt(debug['target_after_home_clamp'], 4)} "
+                f"clamped_axes={debug['clamped_axes']} "
                 f"target_xyz={_fmt(target_xyz, 4)} "
                 f"controller_delta_rpy={_fmt(debug['controller_delta_rpy_deg'], 2)} "
                 f"target_rpy={_fmt(target_rpy, 2)}"

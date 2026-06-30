@@ -12,16 +12,17 @@ import yaml
 
 from piper_vr.buttons import is_pressed
 from piper_vr.config import load_config
-from piper_vr.frame_calibration import controller_delta_in_control_frame
+from piper_vr.frame_calibration import ControlFrameConfig, controller_delta_in_control_frame, get_control_frame
 from piper_vr.quest_reader import QuestReader
 from piper_vr.relative_calibration import dominant_channel, dominant_rotation_channel
 
 
-TRANSLATION_STEPS = (
-    ("right", "left", "robot_y", -1.0),
-    ("up", "down", "robot_z", 1.0),
-    ("forward", "backward", "robot_x", -1.0),
-)
+DEFAULT_DIRECTIONS = {
+    "right": {"robot_axis": "robot_y", "robot_sign": -1.0},
+    "up": {"robot_axis": "robot_z", "robot_sign": 1.0},
+    "forward": {"robot_axis": "robot_x", "robot_sign": 1.0},
+}
+OPPOSITES = {"right": "left", "up": "down", "forward": "backward"}
 ROTATION_STEPS = (
     ("roll_clockwise", "roll_counterclockwise", "robot_roll", 1.0),
     ("pitch_up", "pitch_down", "robot_pitch", 1.0),
@@ -29,6 +30,9 @@ ROTATION_STEPS = (
 )
 QUEST_AXES = ("quest_x", "quest_y", "quest_z")
 QUEST_ROT_AXES = ("quest_roll", "quest_pitch", "quest_yaw")
+SCALE_INDEX = {"robot_x": 0, "robot_y": 1, "robot_z": 2}
+TARGET_ROBOT_DELTA_M = {"robot_x": 0.12, "robot_y": 0.18, "robot_z": 0.10}
+SCALE_LIMITS = {"robot_x": (0.25, 1.2), "robot_y": (0.5, 2.5), "robot_z": (0.25, 1.0)}
 
 
 def _wait_button(quest: QuestReader, side: str, button: str, prompt: str):
@@ -74,6 +78,9 @@ def main() -> int:
     args = parser.parse_args()
 
     config = load_config(args.config)
+    endpoint_config = config.get("quest_endpoint_ik", {})
+    control_frame_name = endpoint_config.get("control_frame", "hmd_yaw")
+    desired = {**DEFAULT_DIRECTIONS, **endpoint_config.get("desired_endpoint_directions", {})}
     side = args.side or config.get("side", "right")
     button = config.get("calibrate_button", "A")
     quest_config = config.get("quest", {})
@@ -85,32 +92,48 @@ def main() -> int:
     )
 
     home_sample, home = _wait_button(quest, side, button, f"Hold controller at endpoint IK HOME, then press {button}.")
+    control_frame = get_control_frame(home_sample, side, ControlFrameConfig(source=control_frame_name), home)
     axis_mapping = {}
     rotation_mapping = {}
+    scale_xyz = np.asarray(endpoint_config.get("scale_xyz", [0.6, 1.5, 0.5]), dtype=float)
     records = []
     warnings = []
+    direction_quality = {}
     try:
-        for movement, opposite, robot_axis, desired_sign in TRANSLATION_STEPS:
+        for movement, settings in desired.items():
+            opposite = OPPOSITES[movement]
+            robot_axis = settings["robot_axis"]
+            desired_sign = float(settings["robot_sign"])
             _, final = _wait_button(quest, side, button, f"Move controller {movement.upper()}, hold, then press {button}.")
-            delta_xyz, _ = controller_delta_in_control_frame(home, final, np.eye(3))
+            delta_xyz, _ = controller_delta_in_control_frame(home, final, control_frame)
             index, channel, sign, value = dominant_channel(delta_xyz)
             axis_mapping[robot_axis] = _rule(desired_sign, value, QUEST_AXES[index])
+            amplitude = max(abs(value), 1e-6)
+            min_scale, max_scale = SCALE_LIMITS[robot_axis]
+            scale_xyz[SCALE_INDEX[robot_axis]] = float(np.clip(TARGET_ROBOT_DELTA_M[robot_axis] / amplitude, min_scale, max_scale))
             records.append({"movement": movement, "delta_xyz": delta_xyz.round(6).tolist(), "dominant_channel": channel, "value": round(value, 6)})
+            direction_quality[movement] = {
+                "pass": True,
+                "robot_axis": robot_axis,
+                "sign": "positive" if desired_sign > 0 else "negative",
+                "controller_channel": channel,
+                "amplitude": round(abs(value), 6),
+            }
             print(f"{movement}: delta_xyz={delta_xyz.round(4).tolist()} dominant={channel} {sign} -> {robot_axis}: {axis_mapping[robot_axis]}")
             _, final = _wait_button(quest, side, button, f"Move controller {opposite.upper()}, hold, then press {button}.")
-            opposite_delta, _ = controller_delta_in_control_frame(home, final, np.eye(3))
+            opposite_delta, _ = controller_delta_in_control_frame(home, final, control_frame)
             opposite_index, opposite_channel, opposite_sign, opposite_value = dominant_channel(opposite_delta)
             records.append({"movement": opposite, "delta_xyz": opposite_delta.round(6).tolist(), "dominant_channel": opposite_channel, "value": round(opposite_value, 6)})
             warnings.extend(_pair_warnings(movement, value, index, opposite, opposite_value, opposite_index, min_amplitude=0.03, unit="m"))
         for movement, opposite, robot_axis, desired_sign in ROTATION_STEPS:
             _, final = _wait_button(quest, side, button, f"Rotate controller {movement.upper().replace('_', ' ')}, hold, then press {button}.")
-            _, delta_rot = controller_delta_in_control_frame(home, final, np.eye(3))
+            _, delta_rot = controller_delta_in_control_frame(home, final, control_frame)
             index, channel, sign, value = dominant_rotation_channel(delta_rot)
             rotation_mapping[robot_axis] = _rule(desired_sign, value, QUEST_ROT_AXES[index])
             records.append({"movement": movement, "delta_rot_deg": delta_rot.round(6).tolist(), "dominant_channel": channel, "value": round(value, 6)})
             print(f"{movement}: delta_rot={delta_rot.round(3).tolist()} dominant={channel} {sign} -> {robot_axis}: {rotation_mapping[robot_axis]}")
             _, final = _wait_button(quest, side, button, f"Rotate controller {opposite.upper().replace('_', ' ')}, hold, then press {button}.")
-            _, opposite_rot = controller_delta_in_control_frame(home, final, np.eye(3))
+            _, opposite_rot = controller_delta_in_control_frame(home, final, control_frame)
             opposite_index, opposite_channel, _, opposite_value = dominant_rotation_channel(opposite_rot)
             records.append({"movement": opposite, "delta_rot_deg": opposite_rot.round(6).tolist(), "dominant_channel": opposite_channel, "value": round(opposite_value, 6)})
             warnings.extend(_pair_warnings(movement, value, index, opposite, opposite_value, opposite_index, min_amplitude=5.0, unit="deg"))
@@ -119,9 +142,12 @@ def main() -> int:
 
     payload = {
         "quest_endpoint_ik": {
+            "control_frame": control_frame_name,
             "axis_mapping": axis_mapping,
             "rotation_mapping": rotation_mapping,
-            "mapping_metadata": {"records": records, "warnings": warnings, "ok": not warnings},
+            "scale_xyz": scale_xyz.round(4).tolist(),
+            "max_position_step_m_xyz": [0.012, 0.025, 0.012],
+            "mapping_metadata": {"records": records, "warnings": warnings, "ok": not warnings, "direction_quality": direction_quality},
         }
     }
     output = Path(args.output)

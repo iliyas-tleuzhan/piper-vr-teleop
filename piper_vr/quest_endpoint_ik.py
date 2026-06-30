@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 
 from .buttons import is_pressed
+from .frame_calibration import ControlFrameConfig, controller_delta_in_control_frame, get_control_frame
 from .joint_limits import clamp_joints_deg, rate_limit_joints_deg
 from .piper_driver import JointPose
 from .piper_official_kinematics import create_official_fk
@@ -64,6 +65,7 @@ class QuestEndpointIKConfig:
     urdf_path: str = "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"
     ee_frame: str = "link6"
     scale: float = 1.0
+    scale_xyz: np.ndarray = None
     orientation_scale: float = 1.0
     position_only_default: bool = True
     position_deadband_m: float = 0.002
@@ -71,6 +73,7 @@ class QuestEndpointIKConfig:
     position_filter_alpha: float = 0.35
     orientation_filter_alpha: float = 0.35
     max_position_step_m: float = 0.02
+    max_position_step_m_xyz: np.ndarray = None
     max_orientation_step_deg: float = 5.0
     max_delta_from_home_m: np.ndarray = None
     workspace_min_m: np.ndarray = None
@@ -85,6 +88,7 @@ class QuestEndpointIKConfig:
     tracking_error_fault_frames: int = 10
     ik_position_tolerance_m: float = 0.008
     ik_orientation_tolerance_deg: float = 10.0
+    control_frame: str = "hmd_yaw"
 
     @classmethod
     def from_config(cls, config: dict | None) -> "QuestEndpointIKConfig":
@@ -94,6 +98,7 @@ class QuestEndpointIKConfig:
             urdf_path=str(config.get("urdf_path", "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf")),
             ee_frame=str(config.get("ee_frame", "link6")),
             scale=float(config.get("scale", 1.0)),
+            scale_xyz=np.asarray(config.get("scale_xyz", [1.0, 1.0, 1.0]), dtype=float),
             orientation_scale=float(config.get("orientation_scale", 1.0)),
             position_only_default=bool(config.get("position_only_default", True)),
             position_deadband_m=float(config.get("position_deadband_m", 0.002)),
@@ -101,6 +106,7 @@ class QuestEndpointIKConfig:
             position_filter_alpha=float(config.get("position_filter_alpha", 0.35)),
             orientation_filter_alpha=float(config.get("orientation_filter_alpha", 0.35)),
             max_position_step_m=float(config.get("max_position_step_m", 0.02)),
+            max_position_step_m_xyz=np.asarray(config.get("max_position_step_m_xyz", [config.get("max_position_step_m", 0.02)] * 3), dtype=float),
             max_orientation_step_deg=float(config.get("max_orientation_step_deg", 5.0)),
             max_delta_from_home_m=np.asarray(config.get("max_delta_from_home_m", [0.20, 0.20, 0.18]), dtype=float),
             workspace_min_m=np.asarray(config.get("workspace_min_m", [0.18, -0.35, 0.08]), dtype=float),
@@ -115,12 +121,15 @@ class QuestEndpointIKConfig:
             tracking_error_fault_frames=int(config.get("tracking_error_fault_frames", 10)),
             ik_position_tolerance_m=float(config.get("ik_position_tolerance_m", 0.008)),
             ik_orientation_tolerance_deg=float(config.get("ik_orientation_tolerance_deg", 10.0)),
+            control_frame=str(config.get("control_frame", "hmd_yaw")),
         )
 
     def __post_init__(self) -> None:
         if self.backend not in ("firmware_endpoint", "host_ik_sdk_fk", "host_ik_urdf"):
             raise ValueError("quest_endpoint_ik.backend must be firmware_endpoint, host_ik_sdk_fk, or host_ik_urdf")
-        for name in ("workspace_min_m", "workspace_max_m", "max_joint_speed_deg_s", "max_orientation_delta_deg", "max_delta_from_home_m"):
+        if self.control_frame not in ("hmd_yaw", "controller_home", "world"):
+            raise ValueError("quest_endpoint_ik.control_frame must be hmd_yaw, controller_home, or world")
+        for name in ("workspace_min_m", "workspace_max_m", "max_joint_speed_deg_s", "max_orientation_delta_deg", "max_delta_from_home_m", "scale_xyz", "max_position_step_m_xyz"):
             value = np.asarray(getattr(self, name), dtype=float)
             if value.shape != (3,) and name != "max_joint_speed_deg_s":
                 raise ValueError(f"{name} must contain three values")
@@ -143,6 +152,15 @@ class EndpointIKResult:
     controller_delta_rpy_deg: np.ndarray | None = None
     mapped_robot_delta_rpy_deg: np.ndarray | None = None
     target_xyz: np.ndarray | None = None
+    scaled_robot_delta_xyz: np.ndarray | None = None
+    target_before_home_clamp: np.ndarray | None = None
+    target_after_home_clamp: np.ndarray | None = None
+    target_after_workspace_clamp: np.ndarray | None = None
+    clamped_axes: list[str] | None = None
+    control_frame: str | None = None
+    scale: float | None = None
+    scale_xyz: np.ndarray | None = None
+    axis_mapping: dict[str, str] | None = None
     target_rpy_deg: np.ndarray | None = None
     raw_joint_target_deg: np.ndarray | None = None
     safe_joint_target_deg: np.ndarray | None = None
@@ -337,11 +355,12 @@ class QuestEndpointIKSession:
             self.robot_home_xyz,
             self.robot_home_rpy_deg,
             self.config,
+            control_frame=get_control_frame(sample, self.side, ControlFrameConfig(source=self.config.control_frame), self.clutch_controller_home_transform),
         )
         if self.filtered_xyz is None or self.filtered_rpy is None:
             self.filtered_xyz = target_xyz.copy()
             self.filtered_rpy = target_rpy.copy()
-        xyz_step = np.clip(target_xyz - self.filtered_xyz, -self.config.max_position_step_m, self.config.max_position_step_m)
+        xyz_step = np.clip(target_xyz - self.filtered_xyz, -self.config.max_position_step_m_xyz, self.config.max_position_step_m_xyz)
         target_xyz = self.filtered_xyz + xyz_step
         rpy_step = np.clip(target_rpy - self.filtered_rpy, -self.config.max_orientation_step_deg, self.config.max_orientation_step_deg)
         target_rpy = self.filtered_rpy + rpy_step
@@ -354,6 +373,19 @@ class QuestEndpointIKSession:
         self.filtered_rpy = self.filtered_rpy + self.config.orientation_filter_alpha * (target_rpy - self.filtered_rpy)
         result.controller_delta_xyz = debug["controller_delta_xyz"]
         result.mapped_robot_delta_xyz = debug["mapped_robot_delta_xyz"]
+        result.scaled_robot_delta_xyz = debug["scaled_robot_delta_xyz"]
+        result.target_before_home_clamp = debug["target_before_home_clamp"]
+        result.target_after_home_clamp = debug["target_after_home_clamp"]
+        result.target_after_workspace_clamp = debug["target_after_workspace_clamp"]
+        result.clamped_axes = debug["clamped_axes"]
+        result.control_frame = self.config.control_frame
+        result.scale = self.config.scale
+        result.scale_xyz = self.config.scale_xyz.copy()
+        result.axis_mapping = {
+            "robot_x": self.config.axis_mapping.robot_x,
+            "robot_y": self.config.axis_mapping.robot_y,
+            "robot_z": self.config.axis_mapping.robot_z,
+        }
         result.controller_delta_rpy_deg = debug["controller_delta_rpy_deg"]
         result.mapped_robot_delta_rpy_deg = debug["mapped_robot_delta_rpy_deg"]
         result.target_xyz = self.filtered_xyz.copy()
@@ -481,15 +513,16 @@ def endpoint_target_from_controller(
     robot_home_xyz: np.ndarray,
     robot_home_rpy_deg: np.ndarray,
     config: QuestEndpointIKConfig,
+    control_frame: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
     home = np.asarray(controller_home_transform, dtype=float)
     current = np.asarray(current_controller_transform, dtype=float)
-    controller_delta = np.linalg.inv(home) @ current
-    controller_delta_xyz = controller_delta[:3, 3].copy()
-    controller_delta_rpy = _matrix_to_rpy_deg(controller_delta[:3, :3])
+    frame = np.eye(3) if control_frame is None else np.asarray(control_frame, dtype=float)
+    controller_delta_xyz, controller_delta_rpy = controller_delta_in_control_frame(home, current, frame)
     mapped_xyz = config.axis_mapping.apply(controller_delta_xyz) if config.translation_enabled else np.zeros(3)
     mapped_rpy = config.rotation_mapping.apply(controller_delta_rpy) if config.orientation_enabled else np.zeros(3)
-    raw_target_xyz = np.asarray(robot_home_xyz, dtype=float) + mapped_xyz * config.scale
+    scaled_xyz = mapped_xyz * config.scale * config.scale_xyz
+    raw_target_xyz = np.asarray(robot_home_xyz, dtype=float) + scaled_xyz
     home_clamped_xyz = clamp_to_home_box(raw_target_xyz, robot_home_xyz, config)
     target_xyz = clamp_workspace(home_clamped_xyz, config)
     mapped_rpy = clamp_orientation_delta(mapped_rpy * config.orientation_scale, config)
@@ -498,8 +531,13 @@ def endpoint_target_from_controller(
     return target_xyz, target_rpy, {
         "controller_delta_xyz": controller_delta_xyz,
         "mapped_robot_delta_xyz": mapped_xyz,
+        "scaled_robot_delta_xyz": scaled_xyz,
         "controller_delta_rpy_deg": controller_delta_rpy,
         "mapped_robot_delta_rpy_deg": mapped_rpy,
+        "target_before_home_clamp": raw_target_xyz,
+        "target_after_home_clamp": home_clamped_xyz,
+        "target_after_workspace_clamp": target_xyz,
+        "clamped_axes": [axis for axis, before, after in zip(("x", "y", "z"), raw_target_xyz, target_xyz, strict=True) if not np.isclose(before, after)],
         "home_delta_clamped": not np.allclose(raw_target_xyz, home_clamped_xyz),
         "workspace_clamped": not np.allclose(home_clamped_xyz, target_xyz),
     }
