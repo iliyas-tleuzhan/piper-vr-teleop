@@ -1,0 +1,21 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!129 &1
+PlayerSettings:
+  m_ObjectHideFlags: 0
+  serializedVersion: 26
+  productGUID: 00000000000000000000000000000000
+  AndroidProfiler: 0
+  AndroidFilterTouchesWhenObscured: 0
+  AndroidEnableSustainedPerformanceMode: 1
+  defaultScreenOrientation: 4
+  companyName: PiperVR
+  productName: Piper Quest Visualization
+  bundleVersion: 0.1.0
+  AndroidBundleVersionCode: 1
+  applicationIdentifier:
+    Android: com.pipervr.teleopviz
+  AndroidMinSdkVersion: 29
+  AndroidTargetSdkVersion: 35
+  AndroidPreferredInstallLocation: 1
+  AndroidTargetArchitectures: 2

@@ -1,0 +1,393 @@
+{
+  "name": "piper",
+  "source_urdf": "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf",
+  "units": {
+    "position": "meters",
+    "rotation": "radians",
+    "joint_command": "degrees"
+  },
+  "joint_order": [
+    "joint1",
+    "joint2",
+    "joint3",
+    "joint4",
+    "joint5",
+    "joint6"
+  ],
+  "links": [
+    {
+      "name": "world",
+      "visual_origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "visual_mesh": null,
+      "mesh_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "fallback_geometry": true
+    },
+    {
+      "name": "base_link",
+      "visual_origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "visual_mesh": "Models/Piper/dae/base_link.dae",
+      "mesh_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "fallback_geometry": false
+    },
+    {
+      "name": "link1",
+      "visual_origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "visual_mesh": "Models/Piper/dae/link1.dae",
+      "mesh_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "fallback_geometry": false
+    },
+    {
+      "name": "link2",
+      "visual_origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "visual_mesh": "Models/Piper/dae/link2.dae",
+      "mesh_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "fallback_geometry": false
+    },
+    {
+      "name": "link3",
+      "visual_origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "visual_mesh": "Models/Piper/dae/link3.dae",
+      "mesh_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "fallback_geometry": false
+    },
+    {
+      "name": "link4",
+      "visual_origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "visual_mesh": "Models/Piper/dae/link4.dae",
+      "mesh_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "fallback_geometry": false
+    },
+    {
+      "name": "link5",
+      "visual_origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "visual_mesh": "Models/Piper/dae/link5.dae",
+      "mesh_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "fallback_geometry": false
+    },
+    {
+      "name": "link6",
+      "visual_origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "visual_mesh": "Models/Piper/dae/link6.dae",
+      "mesh_scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "fallback_geometry": false
+    }
+  ],
+  "joints": [
+    {
+      "name": "world_to_base_link",
+      "type": "fixed",
+      "parent": "world",
+      "child": "base_link",
+      "origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "limit_deg": {
+        "lower": null,
+        "upper": null
+      },
+      "home_deg": 0.0
+    },
+    {
+      "name": "joint1",
+      "type": "revolute",
+      "parent": "base_link",
+      "child": "link1",
+      "origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.123
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "limit_deg": {
+        "lower": -149.99999553141652,
+        "upper": 149.99999553141652
+      },
+      "home_deg": 0.0
+    },
+    {
+      "name": "joint2",
+      "type": "revolute",
+      "parent": "link1",
+      "child": "link2",
+      "origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          1.5707963,
+          -0.1357866,
+          -3.1415926
+        ]
+      },
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "limit_deg": {
+        "lower": 0.0,
+        "upper": 179.99999692953102
+      },
+      "home_deg": 0.0
+    },
+    {
+      "name": "joint3",
+      "type": "revolute",
+      "parent": "link2",
+      "child": "link3",
+      "origin": {
+        "xyz": [
+          0.28503,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          0.0,
+          0.0,
+          -1.7938494
+        ]
+      },
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "limit_deg": {
+        "lower": -169.99999837335218,
+        "upper": 0.0
+      },
+      "home_deg": 0.0
+    },
+    {
+      "name": "joint4",
+      "type": "revolute",
+      "parent": "link3",
+      "child": "link4",
+      "origin": {
+        "xyz": [
+          -0.02198,
+          -0.25075,
+          0.0
+        ],
+        "rpy": [
+          1.5707963,
+          0.0,
+          0.0
+        ]
+      },
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "limit_deg": {
+        "lower": -99.99999702094436,
+        "upper": 99.99999702094436
+      },
+      "home_deg": 0.0
+    },
+    {
+      "name": "joint5",
+      "type": "revolute",
+      "parent": "link4",
+      "child": "link5",
+      "origin": {
+        "xyz": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "rpy": [
+          -1.5707963,
+          0.0,
+          0.0
+        ]
+      },
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "limit_deg": {
+        "lower": -69.99999562282987,
+        "upper": 69.99999562282987
+      },
+      "home_deg": 0.0
+    },
+    {
+      "name": "joint6",
+      "type": "revolute",
+      "parent": "link5",
+      "child": "link6",
+      "origin": {
+        "xyz": [
+          8.8259e-05,
+          -0.091,
+          0.0
+        ],
+        "rpy": [
+          1.5707963,
+          0.0,
+          0.0
+        ]
+      },
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "limit_deg": {
+        "lower": -119.99999986287999,
+        "upper": 119.99999986287999
+      },
+      "home_deg": 0.0
+    }
+  ]
+}

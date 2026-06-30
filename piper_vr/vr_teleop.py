@@ -17,6 +17,7 @@ from .movep_teleop import main as endpoint_main
 from .piper_driver import PiperDriver
 from .quest_reader import QuestReader
 from .session import JointMimicSession
+from .viz_broadcaster import QuestVizBroadcaster
 
 
 def load_config(path: str | Path) -> dict:
@@ -47,6 +48,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-log", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--log-dir")
+    parser.add_argument("--viz", action="store_true", help="broadcast passive UDP state for the Quest visualization app")
+    parser.add_argument("--viz-host", help="Quest visualization UDP host/IP")
+    parser.add_argument("--viz-port", type=int, help="Quest visualization UDP port")
     return parser
 
 
@@ -66,6 +70,13 @@ def _apply_common_overrides(config: dict, args: argparse.Namespace) -> dict:
     if args.max_joint_speed is not None:
         mimic = config.setdefault("joint_mimic", {})
         mimic["max_joint_speed_deg_s"] = [float(args.max_joint_speed)] * 6
+    viz = config.setdefault("viz", {})
+    if args.viz:
+        viz["enabled"] = True
+    if args.viz_host is not None:
+        viz["host"] = args.viz_host
+    if args.viz_port is not None:
+        viz["port"] = args.viz_port
     return config
 
 
@@ -157,6 +168,12 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
     if args.no_log:
         log_enabled = False
     log_dir = args.log_dir or runtime.get("log_dir", "logs/joint_mimic")
+    viz_config = config.get("viz", {})
+    viz = QuestVizBroadcaster(
+        host=viz_config.get("host", "127.0.0.1"),
+        port=int(viz_config.get("port", 5055)),
+        enabled=bool(viz_config.get("enabled", False)),
+    )
 
     hz = float(config.get("hz", 30.0))
     period_s = 1.0 / hz
@@ -204,10 +221,18 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
     logger = JointMimicJsonlLogger(log_dir) if log_enabled else None
     if logger is not None:
         print(f"Logging joint mimic JSONL to {logger.path}")
+    if viz.enabled:
+        print(f"Quest visualization UDP enabled: {viz.host}:{viz.port}")
     try:
         while True:
             loop_start = time.monotonic()
             result = session.step(quest.get_sample(), driver)
+            viz.send(
+                result,
+                driver,
+                mode="joint_mimic",
+                mapping_mode=session.mimic_config.mapping_mode,
+            )
             if logger is not None:
                 logger.write(result)
             if verbose and time.monotonic() >= next_verbose_s:
@@ -220,6 +245,7 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
         return 0
     finally:
         quest.stop()
+        viz.close()
         if logger is not None:
             logger.close()
 

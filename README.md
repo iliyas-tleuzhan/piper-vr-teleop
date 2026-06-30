@@ -108,9 +108,32 @@ python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --control-mo
 python3 -m piper_vr.dual_movep_teleop --config configs/dual_piper.yaml --dry-run
 ```
 
+## Quest 3 Piper Visualization App
+
+`quest_viz_app/` is a companion Unity/OpenXR project for Meta Quest 3. It visualizes a Piper arm from the official Piper URDF/meshes and animates commanded and measured six-joint state sent by the Python teleop loop over UDP. It is separate from robot control and never commands the real arm.
+
+Quickstart:
+
+```bash
+python3 scripts/prepare_piper_urdf_assets.py
+python3 scripts/convert_piper_urdf_to_unity_json.py
+python3 scripts/debug_viz_receiver.py --port 5055
+python3 -m piper_vr.vr_teleop --dry-run --viz --viz-host 127.0.0.1
+```
+
+For Quest:
+
+```bash
+adb shell ip addr show wlan0
+python3 -m piper_vr.vr_teleop --viz --viz-host <QUEST_IP>
+```
+
+See [Quest Piper visualization app](docs/QUEST_PIPER_VIZ_APP.md) for Unity setup, APK build steps, and UDP troubleshooting.
+
 ## Documentation
 
 - [Joint mimic teleop](docs/JOINT_MIMIC_TELEOP.md)
+- [Quest Piper visualization app](docs/QUEST_PIPER_VIZ_APP.md)
 - [How it works](docs/HOW_IT_WORKS.md)
 - [Axis mapping](docs/AXIS_MAPPING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)

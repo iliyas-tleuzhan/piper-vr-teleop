@@ -9,6 +9,11 @@ runtime:
   log: true
   log_dir: "logs/joint_mimic"
 
+viz:
+  enabled: false
+  host: "127.0.0.1"
+  port: 5055
+
 side: "right"
 deadman_button: "rightGrip"
 calibrate_button: "A"
