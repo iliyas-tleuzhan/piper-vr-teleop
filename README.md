@@ -56,12 +56,15 @@ git pull origin main
 export PYTHONPATH=$PWD:$HOME/Iliyas/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
 
 python3 scripts/check_quest_transport.py --seconds 10
-python3 scripts/calibrate_relative_mapping.py --side right --calibrate-button A
-python3 scripts/print_piper_joints.py --can can0 --debug-feedback
-python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 3 --duration 3 --rate 50
-python3 scripts/tune_joint_mapping_vr.py --can can0 --dry-run
+python3 scripts/record_quest_axis_movements.py --side right
+python3 scripts/generate_relative_gain_config.py
+python3 scripts/predict_piper_motion_from_controller.py --config configs/generated_relative_mapping.yaml
 
-python3 -m piper_vr.vr_teleop
+scripts/setup_can.sh can0 1000000
+python3 scripts/print_piper_joints.py --can can0 --debug-feedback
+python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 5 --duration 2 --rate 50
+
+python3 -m piper_vr.vr_teleop --config configs/generated_relative_mapping.yaml --debug-motion
 ```
 
 `can0` is only an example. Use the CAN interface name your system provides.
@@ -96,7 +99,13 @@ python3 scripts/run_real.py
 python3 scripts/run_dry.py
 scripts/run_real.sh
 scripts/run_dry.sh
-python3 scripts/calibrate_relative_mapping.py --side right --calibrate-button A
+python3 scripts/record_quest_axis_movements.py --side right
+python3 scripts/generate_relative_gain_config.py
+python3 scripts/predict_piper_motion_from_controller.py --config configs/generated_relative_mapping.yaml
+python3 -m piper_vr.vr_teleop --profile safe
+python3 -m piper_vr.vr_teleop --profile normal
+python3 -m piper_vr.vr_teleop --profile fast
+python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --mapping-config configs/generated_relative_mapping.yaml --debug-motion
 python3 -m piper_vr.vr_teleop --can can1
 python3 -m piper_vr.vr_teleop --max-joint-speed 10
 python3 -m piper_vr.vr_teleop --quiet --no-log

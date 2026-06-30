@@ -44,6 +44,10 @@ class SessionResult:
     safe_joint_target_deg: np.ndarray | None = None
     measured_joints: JointPose | None = None
     sample_age_s: float | None = None
+    delta_xyz: np.ndarray | None = None
+    delta_rot_deg: np.ndarray | None = None
+    relative_u: np.ndarray | None = None
+    relative_dq_deg: np.ndarray | None = None
 
 
 class TeleopSession:
@@ -587,6 +591,9 @@ class JointMimicSession:
             delta_rot_deg = np.zeros(3)
 
         u = np.concatenate((delta_xyz, delta_rot_deg))
+        result.delta_xyz = delta_xyz.copy()
+        result.delta_rot_deg = delta_rot_deg.copy()
+        result.relative_u = u.copy()
         self.previous_controller_transform = np.asarray(current_vr, dtype=float).copy()
         if np.allclose(u, 0.0):
             self.stop_counter += 1
@@ -611,6 +618,7 @@ class JointMimicSession:
 
         self.stop_counter = 0
         dq = self.mimic_config.relative_gain_matrix @ u
+        result.relative_dq_deg = dq.copy()
         raw_target = clamp_joints_deg(self.last_command_deg + dq)
         return self._send_joint_target(raw_target, None, None, driver, result, dt)
 

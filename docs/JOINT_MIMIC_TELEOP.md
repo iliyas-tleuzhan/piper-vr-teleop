@@ -75,15 +75,24 @@ Run in this order:
 git pull origin main
 export PYTHONPATH=$PWD:$HOME/Iliyas/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
 python3 scripts/check_quest_transport.py --seconds 10
-python3 scripts/calibrate_relative_mapping.py --side right --calibrate-button A
-python3 scripts/inspect_piper_sdk_feedback.py --can can0
+python3 scripts/record_quest_axis_movements.py --side right
+python3 scripts/generate_relative_gain_config.py
+python3 scripts/predict_piper_motion_from_controller.py --config configs/generated_relative_mapping.yaml
+scripts/setup_can.sh can0 1000000
 python3 scripts/print_piper_joints.py --can can0 --debug-feedback
-python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 3 --duration 3 --rate 50
-python3 scripts/tune_joint_mapping_vr.py --can can0 --dry-run
-python3 -m piper_vr.vr_teleop
+python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 5 --duration 2 --rate 50
+python3 -m piper_vr.vr_teleop --config configs/generated_relative_mapping.yaml --debug-motion
 ```
 
-Start by tuning `joint_mimic.signs`, then `gains`, then `offsets_deg`. Keep `speed_percent` and `max_joint_speed_deg_s` low until every axis direction is verified.
+The checked-in gain matrix is a strong temporary guess. Prefer the generated mapping because it measures which Quest delta channel changes for physical up/down/left/right/forward/back. `--debug-motion` prints raw controller XYZ, control-frame deltas, dominant channel, `u`, `dq`, raw/safe targets, measured joints, and tracking error.
+
+Speed profiles are available when a slower first run is needed:
+
+```bash
+python3 -m piper_vr.vr_teleop --profile safe
+python3 -m piper_vr.vr_teleop --profile normal
+python3 -m piper_vr.vr_teleop --profile fast
+```
 
 For slow real-hardware tuning without the human-arm inference layer:
 

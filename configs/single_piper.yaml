@@ -1,6 +1,18 @@
 can: "can0"
 hz: 30.0
-speed_percent: 5
+speed_percent: 100
+active_profile: "fast"
+
+profiles:
+  safe:
+    speed_percent: 10
+    max_joint_speed_deg_s: [10, 10, 10, 10, 10, 10]
+  normal:
+    speed_percent: 50
+    max_joint_speed_deg_s: [45, 45, 45, 45, 45, 45]
+  fast:
+    speed_percent: 100
+    max_joint_speed_deg_s: [90, 90, 90, 90, 90, 90]
 
 control_mode: "joint_mimic"
 
@@ -38,7 +50,7 @@ human_arm:
 joint_mimic:
   mapping_mode: "relative_delta"
   control_frame: "hmd_yaw"
-  translation_deadband_m: 0.003
+  translation_deadband_m: 0.0015
   rotation_deadband_deg: 2.0
   settle_frames_on_stop: 3
   cancel_backlog_on_stop: true
@@ -46,13 +58,15 @@ joint_mimic:
   offsets_deg: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   signs: [1, 1, 1, 1, 1, 1]
   gains: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-  max_joint_speed_deg_s: [5, 5, 5, 5, 5, 5]
-  smoothing_alpha: 0.25
+  max_joint_speed_deg_s: [90, 90, 90, 90, 90, 90]
+  smoothing_alpha: 0.65
   idle_hold_hz: 0.0
+  # Temporary strong default. Run scripts/record_quest_axis_movements.py and
+  # scripts/generate_relative_gain_config.py before real tuning whenever possible.
   relative_gain_matrix:
-    - [30.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    - [0.0, 0.0, 30.0, 0.0, 0.0, 0.0]
-    - [0.0, 0.0, -30.0, 0.0, 0.0, 0.0]
+    - [-300.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    - [0.0, 250.0, 250.0, 0.0, 0.0, 0.0]
+    - [0.0, -250.0, 250.0, 0.0, 0.0, 0.0]
     - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]

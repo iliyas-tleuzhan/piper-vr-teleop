@@ -9,25 +9,23 @@ from datetime import datetime
 from pathlib import Path
 
 import numpy as np
-import yaml
 
+from .config import apply_profile, deep_merge, load_config
 from .human_arm_model import HumanArmConfig
 from .joint_mimic import JointMimicConfig
 from .movep_teleop import main as endpoint_main
 from .piper_driver import PiperDriver
 from .quest_reader import QuestReader
 from .session import JointMimicSession
+from .relative_calibration import dominant_channel
 from .viz_broadcaster import QuestVizBroadcaster
-
-
-def load_config(path: str | Path) -> dict:
-    with open(path, "r", encoding="utf-8") as handle:
-        return yaml.safe_load(handle) or {}
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Quest 3 to AgileX Piper teleoperation")
     parser.add_argument("--config", default="configs/single_piper.yaml")
+    parser.add_argument("--mapping-config", help="YAML patch merged into --config, normally configs/generated_relative_mapping.yaml")
+    parser.add_argument("--profile", choices=("safe", "normal", "fast"), help="Apply a speed profile from the config")
     parser.add_argument("--control-mode", choices=("joint_mimic", "endpoint_firmware", "external_ik"))
     parser.add_argument("--can")
     parser.add_argument("--hz", type=float)
@@ -51,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--viz", action="store_true", help="broadcast passive UDP state for the Quest visualization app")
     parser.add_argument("--viz-host", help="Quest visualization UDP host/IP")
     parser.add_argument("--viz-port", type=int, help="Quest visualization UDP port")
+    parser.add_argument("--debug-motion", action="store_true", help="print relative motion internals at 10 Hz")
     return parser
 
 
@@ -112,6 +111,30 @@ def _print_joint_verbose(result, driver: PiperDriver, transport_name: str) -> No
     )
 
 
+def _print_motion_debug(result, driver: PiperDriver) -> None:
+    measured = result.measured_joints or driver.read_joint_pose()
+    if result.delta_xyz is None:
+        dominant = "None"
+    else:
+        _, channel, sign, value = dominant_channel(result.delta_xyz)
+        dominant = f"{channel} {sign} {value:.4f}"
+    tracking_error = None
+    if measured is not None and result.safe_joint_target_deg is not None:
+        tracking_error = float(np.linalg.norm(measured.joints_deg - result.safe_joint_target_deg))
+    print(
+        "[debug-motion] "
+        f"raw_controller_xyz={_format_array(result.controller_xyz, 4)} "
+        f"delta_xyz={_format_array(result.delta_xyz, 4)} "
+        f"dominant={dominant} "
+        f"u={_format_array(result.relative_u, 4)} "
+        f"dq={_format_array(result.relative_dq_deg, 2)} "
+        f"raw_target={_format_array(result.raw_joint_target_deg, 2)} "
+        f"safe_target={_format_array(result.safe_joint_target_deg, 2)} "
+        f"measured_joints={_format_array(None if measured is None else measured.joints_deg, 2)} "
+        f"tracking_error={None if tracking_error is None else round(tracking_error, 2)}"
+    )
+
+
 def command_joint_hold_on_exit(driver: PiperDriver) -> bool:
     try:
         driver.hold_joints(allow_last_command_fallback=True)
@@ -149,6 +172,11 @@ class JointMimicJsonlLogger:
             "target_joints_deg": arr(result.raw_joint_target_deg),
             "safe_joints_deg": arr(result.safe_joint_target_deg),
             "measured_joints_deg": arr(None if result.measured_joints is None else result.measured_joints.joints_deg),
+            "delta_xyz": arr(result.delta_xyz),
+            "delta_rot_deg": arr(result.delta_rot_deg),
+            "dominant_movement_channel": None if result.delta_xyz is None else dominant_channel(result.delta_xyz)[1],
+            "relative_u": arr(result.relative_u),
+            "relative_dq_deg": arr(result.relative_dq_deg),
             "action": result.action,
             "reason": result.reason,
         }
@@ -218,6 +246,7 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
     )
 
     next_verbose_s = 0.0
+    next_debug_s = 0.0
     logger = JointMimicJsonlLogger(log_dir) if log_enabled else None
     if logger is not None:
         print(f"Logging joint mimic JSONL to {logger.path}")
@@ -238,6 +267,9 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
             if verbose and time.monotonic() >= next_verbose_s:
                 next_verbose_s = time.monotonic() + 0.2
                 _print_joint_verbose(result, driver, transport_name)
+            if args.debug_motion and time.monotonic() >= next_debug_s:
+                next_debug_s = time.monotonic() + 0.1
+                _print_motion_debug(result, driver)
             time.sleep(max(0.0, period_s - (time.monotonic() - loop_start)))
     except KeyboardInterrupt:
         print("\nCtrl+C received. Holding at the measured joint pose.")
@@ -252,7 +284,11 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
 
 def main() -> int:
     args = build_parser().parse_args()
-    config = _apply_common_overrides(load_config(args.config), args)
+    config = load_config(args.config)
+    if args.mapping_config:
+        config = deep_merge(config, load_config(args.mapping_config))
+    config = apply_profile(config, args.profile)
+    config = _apply_common_overrides(config, args)
     mode = config.get("control_mode", "joint_mimic")
     if mode == "joint_mimic":
         return _run_joint_mimic(args, config)
