@@ -112,5 +112,32 @@ external_ik:
   orientation_weight: 0.1
   urdf_path: "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"
 
+quest_endpoint_ik:
+  enabled: true
+  urdf_path: "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"
+  ee_frame: "link6"
+  scale: 1.0
+  orientation_scale: 1.0
+  position_deadband_m: 0.002
+  orientation_deadband_deg: 1.5
+  position_filter_alpha: 0.35
+  orientation_filter_alpha: 0.35
+  max_position_step_m: 0.02
+  max_orientation_step_deg: 5.0
+  workspace_min_m: [0.18, -0.35, 0.08]
+  workspace_max_m: [0.65, 0.35, 0.60]
+  max_joint_speed_deg_s: [45, 45, 45, 60, 60, 90]
+  max_orientation_delta_deg: [60, 60, 90]
+  max_tracking_error_deg: 12.0
+  tracking_error_fault_frames: 10
+  axis_mapping:
+    robot_x: "-quest_z"
+    robot_y: "-quest_x"
+    robot_z: "+quest_y"
+  rotation_mapping:
+    robot_roll: "+quest_roll"
+    robot_pitch: "+quest_pitch"
+    robot_yaw: "+quest_yaw"
+
 urdf_guard_enabled: false
 urdf_path: "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"

@@ -15,6 +15,7 @@ from .human_arm_model import HumanArmConfig
 from .joint_mimic import JointMimicConfig
 from .movep_teleop import main as endpoint_main
 from .piper_driver import PiperDriver
+from .quest_endpoint_ik import QuestEndpointIKConfig, QuestEndpointIKSession
 from .quest_reader import QuestReader
 from .session import JointMimicSession
 from .relative_calibration import dominant_channel
@@ -26,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="configs/single_piper.yaml")
     parser.add_argument("--mapping-config", help="YAML patch merged into --config, normally configs/generated_relative_mapping.yaml")
     parser.add_argument("--profile", choices=("safe", "normal", "fast"), help="Apply a speed profile from the config")
-    parser.add_argument("--control-mode", choices=("joint_mimic", "endpoint_firmware", "external_ik"))
+    parser.add_argument("--control-mode", choices=("joint_mimic", "endpoint_firmware", "external_ik", "quest_endpoint_ik"))
     parser.add_argument("--can")
     parser.add_argument("--hz", type=float)
     parser.add_argument("--speed-percent", type=int)
@@ -54,6 +55,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--wrist-gain", type=float, help="scale wrist rotation gain columns live")
     parser.add_argument("--translation-only", action="store_true", help="zero rotation columns so only joints 1-3 move")
     parser.add_argument("--rotation-only", "--wrist-only", dest="rotation_only", action="store_true", help="zero translation columns so only joints 4-6 move")
+    parser.add_argument("--endpoint-ik", action="store_true", help="shortcut for --control-mode quest_endpoint_ik")
+    parser.add_argument("--ik-scale", type=float, help="Quest endpoint IK translation scale")
+    parser.add_argument("--ik-orientation-scale", type=float, help="Quest endpoint IK orientation scale")
+    parser.add_argument("--disable-orientation", action="store_true", help="disable endpoint IK orientation control")
+    parser.add_argument("--debug-ik", action="store_true", help="print endpoint IK internals at 10 Hz")
     return parser
 
 
@@ -70,6 +76,18 @@ def _apply_common_overrides(config: dict, args: argparse.Namespace) -> dict:
         value = getattr(args, attr)
         if value is not None:
             config[key] = value
+    if getattr(args, "endpoint_ik", False):
+        config["control_mode"] = "quest_endpoint_ik"
+    endpoint_ik = config.setdefault("quest_endpoint_ik", {})
+    if getattr(args, "ik_scale", None) is not None:
+        endpoint_ik["scale"] = float(args.ik_scale)
+    if getattr(args, "ik_orientation_scale", None) is not None:
+        endpoint_ik["orientation_scale"] = float(args.ik_orientation_scale)
+    if getattr(args, "disable_orientation", False) or getattr(args, "translation_only", False):
+        endpoint_ik["orientation_enabled"] = False
+    if getattr(args, "rotation_only", False):
+        endpoint_ik["translation_enabled"] = False
+        endpoint_ik["orientation_enabled"] = True
     if args.max_joint_speed is not None:
         mimic = config.setdefault("joint_mimic", {})
         mimic["max_joint_speed_deg_s"] = [float(args.max_joint_speed)] * 6
@@ -159,6 +177,27 @@ def _print_motion_debug(result, driver: PiperDriver) -> None:
         f"safe_target={_format_array(result.safe_joint_target_deg, 2)} "
         f"measured_joints={_format_array(None if measured is None else measured.joints_deg, 2)} "
         f"tracking_error={None if tracking_error is None else round(tracking_error, 2)}"
+    )
+
+
+def _print_ik_debug(result, driver: PiperDriver) -> None:
+    measured = result.measured_joints or driver.read_joint_pose()
+    print(
+        "[debug-ik] "
+        f"state={result.state.value} "
+        f"calibrated={result.calibrated} "
+        f"controller_xyz={_format_array(result.controller_xyz, 4)} "
+        f"controller_delta_xyz={_format_array(result.controller_delta_xyz, 4)} "
+        f"mapped_robot_delta_xyz={_format_array(result.mapped_robot_delta_xyz, 4)} "
+        f"target_xyz={_format_array(result.target_xyz, 4)} "
+        f"controller_delta_rpy={_format_array(result.controller_delta_rpy_deg, 2)} "
+        f"target_rpy={_format_array(result.target_rpy_deg, 2)} "
+        f"raw_joints={_format_array(result.raw_joint_target_deg, 2)} "
+        f"safe_joints={_format_array(result.safe_joint_target_deg, 2)} "
+        f"measured_joints={_format_array(None if measured is None else measured.joints_deg, 2)} "
+        f"ik_error=({None if result.position_error_m is None else round(result.position_error_m, 4)},"
+        f"{None if result.orientation_error_deg is None else round(result.orientation_error_deg, 2)}) "
+        f"action={result.action}:{result.reason}"
     )
 
 
@@ -312,6 +351,56 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
             logger.close()
 
 
+def _run_quest_endpoint_ik(args: argparse.Namespace, config: dict) -> int:
+    hz = float(config.get("hz", 30.0))
+    period_s = 1.0 / hz
+    side = config.get("side", "right")
+    deadman_button = config.get("deadman_button", "rightGrip")
+    calibrate_button = config.get("calibrate_button", "A")
+    quest_config = config.get("quest", {})
+    transport_name = quest_config.get("transport", "adb_logcat")
+
+    print("Piper Quest endpoint IK teleoperation")
+    print(f"Control mode: quest_endpoint_ik, robot: {'dry-run' if args.dry_run else 'REAL ROBOT'}")
+    print(f"Transport: {transport_name}, controller: {side}, deadman: {deadman_button}, calibrate: {calibrate_button}")
+    if not args.dry_run:
+        print("WARNING: endpoint IK sends six-joint JointCtrl commands. Keep clear and start with --profile safe.")
+        time.sleep(2.0)
+
+    quest = QuestReader(
+        transport=transport_name,
+        connection=quest_config.get("connection", "usb"),
+        ip_address=quest_config.get("ip_address"),
+        simulate_on_missing=args.dry_run,
+    )
+    driver = PiperDriver(can=config.get("can", "can0"), speed_percent=int(config.get("speed_percent", 5)), dry_run=args.dry_run)
+    driver.connect(initial_mode="joint")
+    ik_config = QuestEndpointIKConfig.from_config(config.get("quest_endpoint_ik"))
+    session = QuestEndpointIKSession(
+        side=side,
+        deadman_button=deadman_button,
+        calibrate_button=calibrate_button,
+        config=ik_config,
+        stale_timeout_s=float(config.get("stale_timeout_s", 0.25)),
+    )
+
+    next_debug_s = 0.0
+    try:
+        while True:
+            loop_start = time.monotonic()
+            result = session.step(quest.get_sample(), driver)
+            if args.debug_ik and time.monotonic() >= next_debug_s:
+                next_debug_s = time.monotonic() + 0.1
+                _print_ik_debug(result, driver)
+            time.sleep(max(0.0, period_s - (time.monotonic() - loop_start)))
+    except KeyboardInterrupt:
+        print("\nCtrl+C received. Holding at the measured joint pose.")
+        command_joint_hold_on_exit(driver)
+        return 0
+    finally:
+        quest.stop()
+
+
 def main() -> int:
     args = build_parser().parse_args()
     config = load_config(args.config)
@@ -322,6 +411,8 @@ def main() -> int:
     mode = config.get("control_mode", "joint_mimic")
     if mode == "joint_mimic":
         return _run_joint_mimic(args, config)
+    if mode == "quest_endpoint_ik":
+        return _run_quest_endpoint_ik(args, config)
     if mode in ("endpoint_firmware", "external_ik"):
         if mode == "external_ik":
             print("external_ik is available as a library path; endpoint_firmware is used as the runtime fallback until tuned.")

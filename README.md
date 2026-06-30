@@ -14,6 +14,8 @@ Quest controller pose -> safety/clutch mapping -> EndPoseCtrl -> Piper firmware 
 
 Use `joint_mimic` when the goal is whole-arm teleoperation. It is still approximate because the Quest controller does not directly measure the shoulder or elbow, but the final robot command is six simultaneous joint angles through `JointCtrl`, not firmware endpoint IK. Use `endpoint_firmware` when you only need to move the gripper endpoint and are comfortable letting Piper firmware choose the internal joint posture. `external_ik` is an optional host-side path for endpoint targets plus posture objectives; it sends `JointCtrl` results rather than relying on firmware endpoint IK.
 
+`quest_endpoint_ik` is the more natural Cartesian mode. It is closest to AgileX's hand-gesture demo: calibrate a controller home frame, move a tracked hand/controller relative to that frame, map that relative motion to an end-effector target, then solve IK for all six Piper joints. This project uses Quest 3 controller 6DoF tracking instead of camera, MediaPipe, and depth alignment.
+
 Joint mimic is calibration-relative. Pressing `A` only calibrates; every new `rightGrip` press creates a new clutch anchor. If you move the controller while the deadman is released, the robot should not jump when you grip again.
 
 The default `joint_mimic` mapping is now six-joint `relative_delta`: each frame uses small controller motion in a calibrated HMD-yaw/control frame to increment the robot joint target. Controller translation drives joints 1-3, and controller rotation drives wrist joints 4-6 while `rightGrip` is held. `rightTrig` is not required for wrist motion by default.
@@ -68,6 +70,40 @@ python3 -m piper_vr.vr_teleop --config configs/generated_relative_mapping.yaml -
 ```
 
 `can0` is only an example. Use the CAN interface name your system provides.
+
+## Quest Endpoint IK Mode
+
+Endpoint IK mode is selected with `control_mode: "quest_endpoint_ik"` or `--endpoint-ik`. In this mode:
+
+- `A` calibrates the current Quest controller pose and current Piper FK end-effector pose.
+- Holding `rightGrip` maps controller translation to target end-effector XYZ.
+- Holding `rightGrip` maps controller rotation to target end-effector orientation.
+- The host solves IK from the Piper URDF and sends all six joints with `JointCtrl`.
+- Releasing `rightGrip` holds/stops the whole arm.
+
+Real endpoint IK test sequence:
+
+```bash
+cd ~/Iliyas/piper-vr-teleop
+git pull origin main
+export PYTHONPATH=$PWD:$HOME/Iliyas/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
+
+python3 scripts/check_quest_transport.py --seconds 10
+
+python3 scripts/calibrate_quest_endpoint_frame.py --side right
+python3 scripts/predict_endpoint_ik_from_controller.py --config configs/generated_endpoint_ik_mapping.yaml
+
+scripts/setup_can.sh can0 1000000
+python3 scripts/print_piper_joints.py --can can0 --debug-feedback
+
+python3 -m piper_vr.vr_teleop \
+  --config configs/single_piper.yaml \
+  --mapping-config configs/generated_endpoint_ik_mapping.yaml \
+  --control-mode quest_endpoint_ik \
+  --profile safe \
+  --debug-ik \
+  --no-log
+```
 
 ## Controls
 
