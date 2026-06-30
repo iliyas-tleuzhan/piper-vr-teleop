@@ -6,7 +6,8 @@ import numpy as np
 import pytest
 
 from piper_vr.config import deep_merge
-from piper_vr.piper_driver import JointPose
+from piper_vr.piper_official_kinematics import PiperOfficialDHForwardKinematics
+from piper_vr.piper_driver import EndPose, JointPose
 from piper_vr.quest_endpoint_ik import (
     EndpointAxisMapping,
     EndpointRotationMapping,
@@ -17,6 +18,7 @@ from piper_vr.quest_endpoint_ik import (
     endpoint_target_from_controller,
 )
 from piper_vr.types import QuestSample, TeleopState
+from piper_vr.units import degrees_to_piper_rpy, meters_to_piper_xyz
 
 
 class FakeJointDriver:
@@ -26,9 +28,13 @@ class FakeJointDriver:
         self.dry_run = dry_run
         self.has_sent_joint_command = False
         self.sent = []
+        self.end_pose = EndPose(np.array([0.35, 0.0, 0.25]), np.zeros(3))
 
     def read_joint_pose(self):
         return self.pose if self.feedback_available else None
+
+    def read_end_pose(self):
+        return self.end_pose
 
     def send_joint_pose(self, joints_deg):
         self.pose = JointPose(np.asarray(joints_deg, dtype=float))
@@ -37,6 +43,9 @@ class FakeJointDriver:
 
     def hold_joints(self, allow_last_command_fallback=False):
         self.send_joint_pose(self.pose.joints_deg)
+
+    def hold(self):
+        return None
 
 
 def transform(xyz=(0.0, 0.0, 0.0), yaw_deg=0.0):
@@ -65,6 +74,7 @@ def config(**overrides):
         "orientation_deadband_deg": 0.0,
         "max_position_step_m": 1.0,
         "max_orientation_step_deg": 180.0,
+        "max_delta_from_home_m": [1.0, 1.0, 1.0],
         "max_joint_speed_deg_s": [1000] * 6,
     }
     base.update(overrides)
@@ -91,10 +101,50 @@ def test_axis_mapping_signs_and_rotation_mapping():
     assert EndpointRotationMapping(robot_yaw="-quest_yaw").apply(np.array([1.0, 2.0, 3.0]))[2] == -3.0
 
 
+def test_firmware_endpoint_unit_conversion():
+    assert meters_to_piper_xyz(0.123) == 123000
+    assert degrees_to_piper_rpy(12.5) == 12500
+
+
 def test_workspace_and_orientation_clamp():
     cfg = config(workspace_min_m=[0.2, -0.2, 0.1], workspace_max_m=[0.5, 0.2, 0.4], max_orientation_delta_deg=[10, 20, 30])
     np.testing.assert_allclose(clamp_workspace(np.array([1.0, -1.0, 0.0]), cfg), [0.5, -0.2, 0.1])
     np.testing.assert_allclose(clamp_orientation_delta(np.array([30.0, -30.0, 40.0]), cfg), [10.0, -20.0, 30.0])
+
+
+def test_backend_selection_and_position_only_default():
+    cfg = QuestEndpointIKConfig.from_config({})
+    assert cfg.backend == "firmware_endpoint"
+    assert cfg.orientation_enabled is False
+    assert QuestEndpointIKConfig.from_config({"backend": "host_ik_sdk_fk"}).backend == "host_ik_sdk_fk"
+
+
+def test_official_dh_fk_sanity_units_are_meters():
+    fk = PiperOfficialDHForwardKinematics()
+    xyz, rotation = fk.forward(np.radians([0.0, 90.0, -90.0, 0.0, 0.0, 0.0]))
+    assert xyz.shape == (3,)
+    assert rotation.shape == (3, 3)
+    assert 0.05 < np.linalg.norm(xyz) < 1.0
+
+
+def test_home_relative_clamp():
+    cfg = config(max_delta_from_home_m=[0.1, 0.1, 0.1], axis_mapping={"robot_x": "+quest_x", "robot_y": "+quest_y", "robot_z": "+quest_z"})
+    target_xyz, _, debug = endpoint_target_from_controller(transform(), transform((0.5, 0.0, 0.0)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    np.testing.assert_allclose(target_xyz, [0.4, 0.0, 0.2])
+    assert debug["home_delta_clamped"] is True
+
+
+def test_position_only_mode_ignores_orientation_delta():
+    cfg = config(position_only_default=True, orientation_enabled=False)
+    _, target_rpy, debug = endpoint_target_from_controller(transform(), transform(yaw_deg=45), np.array([0.3, 0.0, 0.2]), np.array([1.0, 2.0, 3.0]), cfg)
+    np.testing.assert_allclose(target_rpy, [1.0, 2.0, 3.0])
+    np.testing.assert_allclose(debug["mapped_robot_delta_rpy_deg"], [0.0, 0.0, 0.0])
+
+
+def test_orientation_opt_in_maps_rotation():
+    cfg = config(position_only_default=False, orientation_enabled=True)
+    _, target_rpy, _ = endpoint_target_from_controller(transform(), transform(yaw_deg=10), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    assert abs(target_rpy[2]) > 1.0
 
 
 def test_endpoint_ik_no_movement_before_calibration_and_deadman_required():
@@ -118,12 +168,12 @@ def test_endpoint_ik_right_grip_clutch_prevents_jump():
 
 
 def test_ik_unavailable_gives_clear_error():
-    with pytest.raises(RuntimeError, match="Quest endpoint IK solver unavailable"):
+    with pytest.raises(RuntimeError, match="git submodule update --init --recursive"):
         QuestEndpointIKSession(
             side="right",
             deadman_button="rightGrip",
             calibrate_button="A",
-            config=config(urdf_path="missing.urdf"),
+            config=config(backend="host_ik_urdf", urdf_path="missing.urdf"),
             stale_timeout_s=0.25,
         )
 
@@ -149,3 +199,17 @@ def test_generated_endpoint_mapping_config_deep_merges():
     assert merged["quest_endpoint_ik"]["axis_mapping"]["robot_x"] == "+quest_y"
     assert merged["quest_endpoint_ik"]["axis_mapping"]["robot_y"] == "-quest_x"
     assert merged["quest_endpoint_ik"]["rotation_mapping"]["robot_yaw"] == "-quest_yaw"
+
+
+def test_official_sdk_fk_compare_if_available():
+    try:
+        from piper_vr.piper_official_kinematics import PiperSDKForwardKinematics
+
+        sdk_fk = PiperSDKForwardKinematics()
+    except RuntimeError:
+        pytest.skip("piper_sdk official FK is not installed")
+    local_fk = PiperOfficialDHForwardKinematics()
+    joints = np.radians([0.0, 90.0, -90.0, 0.0, 0.0, 0.0])
+    sdk_xyz, _ = sdk_fk.forward(joints)
+    local_xyz, _ = local_fk.forward(joints)
+    assert np.linalg.norm(sdk_xyz - local_xyz) < 0.20

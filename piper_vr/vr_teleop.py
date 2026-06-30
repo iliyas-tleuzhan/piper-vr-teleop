@@ -56,8 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--translation-only", action="store_true", help="zero rotation columns so only joints 1-3 move")
     parser.add_argument("--rotation-only", "--wrist-only", dest="rotation_only", action="store_true", help="zero translation columns so only joints 4-6 move")
     parser.add_argument("--endpoint-ik", action="store_true", help="shortcut for --control-mode quest_endpoint_ik")
+    parser.add_argument("--ik-backend", choices=("firmware_endpoint", "host_ik_sdk_fk", "host_ik_urdf"), help="Quest endpoint IK backend")
     parser.add_argument("--ik-scale", type=float, help="Quest endpoint IK translation scale")
     parser.add_argument("--ik-orientation-scale", type=float, help="Quest endpoint IK orientation scale")
+    parser.add_argument("--position-only", action="store_true", help="disable endpoint IK orientation control")
     parser.add_argument("--disable-orientation", action="store_true", help="disable endpoint IK orientation control")
     parser.add_argument("--debug-ik", action="store_true", help="print endpoint IK internals at 10 Hz")
     return parser
@@ -79,12 +81,18 @@ def _apply_common_overrides(config: dict, args: argparse.Namespace) -> dict:
     if getattr(args, "endpoint_ik", False):
         config["control_mode"] = "quest_endpoint_ik"
     endpoint_ik = config.setdefault("quest_endpoint_ik", {})
+    if getattr(args, "ik_backend", None) is not None:
+        endpoint_ik["backend"] = args.ik_backend
     if getattr(args, "ik_scale", None) is not None:
         endpoint_ik["scale"] = float(args.ik_scale)
     if getattr(args, "ik_orientation_scale", None) is not None:
         endpoint_ik["orientation_scale"] = float(args.ik_orientation_scale)
-    if getattr(args, "disable_orientation", False) or getattr(args, "translation_only", False):
+    if getattr(args, "disable_orientation", False) or getattr(args, "position_only", False) or getattr(args, "translation_only", False):
         endpoint_ik["orientation_enabled"] = False
+        endpoint_ik["position_only_default"] = True
+    if getattr(args, "orientation_enabled", False):
+        endpoint_ik["orientation_enabled"] = True
+        endpoint_ik["position_only_default"] = False
     if getattr(args, "rotation_only", False):
         endpoint_ik["translation_enabled"] = False
         endpoint_ik["orientation_enabled"] = True
@@ -373,9 +381,9 @@ def _run_quest_endpoint_ik(args: argparse.Namespace, config: dict) -> int:
         ip_address=quest_config.get("ip_address"),
         simulate_on_missing=args.dry_run,
     )
-    driver = PiperDriver(can=config.get("can", "can0"), speed_percent=int(config.get("speed_percent", 5)), dry_run=args.dry_run)
-    driver.connect(initial_mode="joint")
     ik_config = QuestEndpointIKConfig.from_config(config.get("quest_endpoint_ik"))
+    driver = PiperDriver(can=config.get("can", "can0"), speed_percent=int(config.get("speed_percent", 5)), dry_run=args.dry_run)
+    driver.connect(initial_mode="endpoint" if ik_config.backend == "firmware_endpoint" else "joint")
     session = QuestEndpointIKSession(
         side=side,
         deadman_button=deadman_button,

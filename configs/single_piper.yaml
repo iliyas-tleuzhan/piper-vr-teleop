@@ -114,19 +114,25 @@ external_ik:
 
 quest_endpoint_ik:
   enabled: true
+  backend: "firmware_endpoint"
   urdf_path: "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf"
   ee_frame: "link6"
-  scale: 1.0
-  orientation_scale: 1.0
-  position_deadband_m: 0.002
-  orientation_deadband_deg: 1.5
+  position_only_default: true
+  orientation_enabled: false
+  scale: 0.5
+  orientation_scale: 0.3
+  position_deadband_m: 0.003
+  orientation_deadband_deg: 3.0
   position_filter_alpha: 0.35
   orientation_filter_alpha: 0.35
-  max_position_step_m: 0.02
-  max_orientation_step_deg: 5.0
+  max_delta_from_home_m: [0.20, 0.20, 0.18]
+  max_position_step_m: 0.01
+  max_orientation_step_deg: 3.0
   workspace_min_m: [0.18, -0.35, 0.08]
   workspace_max_m: [0.65, 0.35, 0.60]
-  max_joint_speed_deg_s: [45, 45, 45, 60, 60, 90]
+  max_joint_speed_deg_s: [20, 20, 20, 30, 30, 45]
+  ik_position_tolerance_m: 0.008
+  ik_orientation_tolerance_deg: 10.0
   max_orientation_delta_deg: [60, 60, 90]
   max_tracking_error_deg: 12.0
   tracking_error_fault_frames: 10

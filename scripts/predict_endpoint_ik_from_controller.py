@@ -11,8 +11,9 @@ import numpy as np
 from piper_vr.buttons import is_pressed
 from piper_vr.config import deep_merge, load_config
 from piper_vr.piper_driver import PiperDriver
+from piper_vr.piper_official_kinematics import create_official_fk
 from piper_vr.piper_kinematics import PiperKinematics
-from piper_vr.quest_endpoint_ik import QuestEndpointIKConfig, endpoint_target_from_controller
+from piper_vr.quest_endpoint_ik import QuestEndpointIKConfig, endpoint_target_from_controller, solve_endpoint_ik
 from piper_vr.quest_reader import QuestReader
 from piper_vr.vr_mapping import _matrix_to_rpy_deg
 
@@ -44,7 +45,12 @@ def main() -> int:
     button = config.get("calibrate_button", "A")
     quest_config = config.get("quest", {})
     ik_config = QuestEndpointIKConfig.from_config(config.get("quest_endpoint_ik"))
-    kinematics = PiperKinematics(ik_config.urdf_path, tip_link=ik_config.ee_frame)
+    if ik_config.backend == "host_ik_urdf":
+        kinematics = PiperKinematics(ik_config.urdf_path, tip_link=ik_config.ee_frame)
+    elif ik_config.backend == "host_ik_sdk_fk":
+        kinematics = create_official_fk(prefer_sdk=True)
+    else:
+        kinematics = None
     quest = QuestReader(
         transport=quest_config.get("transport", "adb_logcat"),
         connection=quest_config.get("connection", "usb"),
@@ -61,8 +67,16 @@ def main() -> int:
         if measured is None:
             raise RuntimeError("Piper joint feedback is required with --robot")
         robot_home_joints = measured.joints_deg.copy()
-    robot_home_xyz, robot_home_rotation = kinematics.forward(np.radians(robot_home_joints))
-    robot_home_rpy = _matrix_to_rpy_deg(robot_home_rotation)
+    if args.robot and driver is not None and ik_config.backend == "firmware_endpoint":
+        pose = driver.read_end_pose()
+        robot_home_xyz = pose.xyz_m.copy()
+        robot_home_rpy = pose.rpy_deg.copy()
+    elif kinematics is not None:
+        robot_home_xyz, robot_home_rotation = kinematics.forward(np.radians(robot_home_joints))
+        robot_home_rpy = _matrix_to_rpy_deg(robot_home_rotation)
+    else:
+        robot_home_xyz = np.array([0.35, 0.0, 0.25], dtype=float)
+        robot_home_rpy = np.zeros(3)
 
     print(f"Press {button} to set controller home. Robot home xyz={_fmt(robot_home_xyz)} rpy={_fmt(robot_home_rpy, 2)}")
     home = None
@@ -91,12 +105,15 @@ def main() -> int:
                 f"controller_delta_rpy={_fmt(debug['controller_delta_rpy_deg'], 2)} "
                 f"target_rpy={_fmt(target_rpy, 2)}"
             )
-            if args.robot:
-                result = kinematics.solve(target_xyz, target_rpy, np.radians(robot_home_joints))
-                q_deg = np.degrees(result.joints_rad)
-                print(f"  ik success={result.success} q_deg={_fmt(q_deg, 2)} error=({result.position_error_m:.4f},{result.orientation_error_deg:.2f})")
+            if args.robot and ik_config.backend == "firmware_endpoint":
+                print("  firmware_endpoint target only; Piper firmware performs IK internally")
+                if args.send and driver is not None:
+                    driver.send_end_pose(target_xyz, target_rpy)
+            elif args.robot and kinematics is not None:
+                result = solve_endpoint_ik(kinematics, target_xyz, target_rpy, robot_home_joints, robot_home_joints, ik_config)
+                print(f"  ik success={result.success} q_deg={_fmt(result.joints_deg, 2)} error=({result.position_error_m:.4f},{result.orientation_error_deg:.2f})")
                 if args.send and driver is not None and result.success:
-                    driver.send_joint_pose(q_deg)
+                    driver.send_joint_pose(result.joints_deg)
             time.sleep(0.1)
     except KeyboardInterrupt:
         return 0

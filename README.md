@@ -86,21 +86,37 @@ Real endpoint IK test sequence:
 ```bash
 cd ~/Iliyas/piper-vr-teleop
 git pull origin main
+git submodule update --init --recursive || true
 export PYTHONPATH=$PWD:$HOME/Iliyas/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
 
-python3 scripts/check_quest_transport.py --seconds 10
+python3 -m compileall piper_vr scripts tests
+pytest -q
 
+python3 scripts/check_quest_transport.py --seconds 10
 python3 scripts/calibrate_quest_endpoint_frame.py --side right
 python3 scripts/predict_endpoint_ik_from_controller.py --config configs/generated_endpoint_ik_mapping.yaml
 
 scripts/setup_can.sh can0 1000000
 python3 scripts/print_piper_joints.py --can can0 --debug-feedback
 
+# First, firmware endpoint dry-run / target test:
+python3 scripts/test_firmware_endpoint_from_quest.py --config configs/generated_endpoint_ik_mapping.yaml
+
+# Then with robot, no send:
+python3 scripts/test_firmware_endpoint_from_quest.py --robot --can can0 --config configs/generated_endpoint_ik_mapping.yaml
+
+# Then real low-scale firmware endpoint:
+python3 scripts/test_firmware_endpoint_from_quest.py --robot --send --can can0 --config configs/generated_endpoint_ik_mapping.yaml --scale 0.3
+
+# Real teleop, safest first:
 python3 -m piper_vr.vr_teleop \
   --config configs/single_piper.yaml \
   --mapping-config configs/generated_endpoint_ik_mapping.yaml \
-  --control-mode quest_endpoint_ik \
+  --endpoint-ik \
+  --ik-backend firmware_endpoint \
   --profile safe \
+  --ik-scale 0.3 \
+  --position-only \
   --debug-ik \
   --no-log
 ```
