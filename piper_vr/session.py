@@ -9,8 +9,11 @@ from collections.abc import Callable
 
 import numpy as np
 
-from .buttons import is_pressed
-from .piper_driver import EndPose
+from .buttons import analog_value, is_pressed
+from .human_arm_model import HumanArmConfig, HumanArmState, build_human_arm_state, estimate_shoulder_from_hmd
+from .joint_limits import clamp_joints_deg, rate_limit_joints_deg
+from .joint_mimic import JointMimicConfig, human_arm_to_piper_joints
+from .piper_driver import EndPose, JointPose
 from .safety import OrientationLimiter, SafetyLimiter, SignalFilter
 from .types import QuestSample, TeleopState
 from .vr_mapping import AxisMapping, orientation_target_from_home, target_from_home
@@ -29,6 +32,10 @@ class SessionResult:
     action: str = "skipped"
     reason: str = "none"
     piper_pose: EndPose | None = None
+    human_arm: HumanArmState | None = None
+    raw_joint_target_deg: np.ndarray | None = None
+    safe_joint_target_deg: np.ndarray | None = None
+    measured_joints: JointPose | None = None
     sample_age_s: float | None = None
 
 
@@ -235,3 +242,200 @@ class TeleopSession:
         self.position_filter.reset(xyz_m)
         self.orientation_safety.reset(rpy_deg, now_s)
         self.orientation_filter.reset(rpy_deg)
+
+
+class JointMimicSession:
+    """Stateful Quest-to-Piper joint mimic policy."""
+
+    def __init__(
+        self,
+        *,
+        side: str,
+        deadman_button: str,
+        calibrate_button: str,
+        human_config: HumanArmConfig,
+        mimic_config: JointMimicConfig,
+        stale_timeout_s: float,
+        elbow_swivel_joystick: str | None = "rightJS_x",
+        shoulder_lift_joystick: str | None = None,
+    ) -> None:
+        self.side = side
+        self.deadman_button = deadman_button
+        self.calibrate_button = calibrate_button
+        self.human_config = human_config
+        self.mimic_config = mimic_config
+        self.stale_timeout_s = float(stale_timeout_s)
+        self.elbow_swivel_joystick = elbow_swivel_joystick
+        self.shoulder_lift_joystick = shoulder_lift_joystick
+        self.state = TeleopState.WAITING_FOR_DEVICE
+        self.controller_home: np.ndarray | None = None
+        self.fixed_shoulder_xyz_m: np.ndarray | None = None
+        self.measured_home_joints_deg: np.ndarray | None = None
+        self.last_command_deg: np.ndarray | None = None
+        self.previous_elbow: np.ndarray | None = None
+        self.elbow_swivel_rad = float(human_config.elbow_swivel_default_rad)
+        self.last_step_s: float | None = None
+        self.was_deadman_pressed = False
+        self.was_calibrate_pressed = False
+        self.require_deadman_repress = False
+
+    @property
+    def calibrated(self) -> bool:
+        return self.controller_home is not None and self.fixed_shoulder_xyz_m is not None
+
+    def step(self, sample: QuestSample | None, driver: Any) -> SessionResult:
+        now_s = time.monotonic()
+        dt = 1e-3 if self.last_step_s is None else max(now_s - self.last_step_s, 1e-3)
+        self.last_step_s = now_s
+        if sample is None:
+            self.state = TeleopState.WAITING_FOR_DEVICE
+            return SessionResult(self.state, self.calibrated, reason="no_quest_sample")
+
+        buttons = sample.buttons
+        deadman = is_pressed(buttons, self.deadman_button)
+        calibrate = is_pressed(buttons, self.calibrate_button)
+        current_vr = sample.transforms_openxr.get(self.side)
+        controller_xyz = None if current_vr is None else np.asarray(current_vr, dtype=float)[:3, 3].copy()
+        result = SessionResult(
+            state=self.state,
+            calibrated=self.calibrated,
+            deadman=deadman,
+            calibrate=calibrate,
+            controller_xyz=controller_xyz,
+            sample_age_s=sample.age_s,
+        )
+
+        if current_vr is None:
+            self.state = TeleopState.WAITING_FOR_DEVICE
+            result.state = self.state
+            result.reason = f"missing_{self.side}_controller"
+            return result
+
+        if sample.age_s > self.stale_timeout_s:
+            measured = self._hold(driver)
+            self.state = TeleopState.HOLDING
+            self.require_deadman_repress = True
+            self.was_deadman_pressed = deadman
+            result.state = self.state
+            result.reason = "tracking_stale"
+            result.measured_joints = measured
+            return result
+
+        if calibrate and not self.was_calibrate_pressed:
+            measured = self._hold(driver)
+            self.controller_home = np.asarray(current_vr, dtype=float).copy()
+            self.fixed_shoulder_xyz_m = self._estimate_calibrated_shoulder(current_vr, sample)
+            self.measured_home_joints_deg = None if measured is None else measured.joints_deg.copy()
+            self.last_command_deg = self.mimic_config.neutral_deg.copy() if measured is None else measured.joints_deg.copy()
+            self.previous_elbow = None
+            self.elbow_swivel_rad = float(self.human_config.elbow_swivel_default_rad)
+            self.require_deadman_repress = True
+            self.was_deadman_pressed = deadman
+            self.state = TeleopState.READY_IDLE
+            result.state = self.state
+            result.calibrated = True
+            result.reason = "calibrated_release_deadman"
+            result.measured_joints = measured
+            self.was_calibrate_pressed = calibrate
+            return result
+        self.was_calibrate_pressed = calibrate
+
+        if not self.calibrated:
+            self.state = TeleopState.WAITING_FOR_CALIBRATION
+            result.state = self.state
+            result.reason = "not_calibrated"
+            return result
+
+        if not deadman:
+            measured = self._hold(driver)
+            self.state = TeleopState.READY_IDLE
+            self.was_deadman_pressed = False
+            self.require_deadman_repress = False
+            result.state = self.state
+            result.reason = "deadman_released"
+            result.measured_joints = measured
+            return result
+
+        if self.require_deadman_repress:
+            self.state = TeleopState.HOLDING
+            result.state = self.state
+            result.reason = "release_deadman_required"
+            return result
+
+        if not self.was_deadman_pressed:
+            measured = driver.read_joint_pose()
+            self.controller_home = np.asarray(current_vr, dtype=float).copy()
+            self.fixed_shoulder_xyz_m = self._estimate_calibrated_shoulder(current_vr, sample)
+            if measured is not None:
+                self.last_command_deg = measured.joints_deg.copy()
+            elif self.last_command_deg is None:
+                self.last_command_deg = self.mimic_config.neutral_deg.copy()
+            self.was_deadman_pressed = True
+            self.state = TeleopState.ACTIVE
+            result.state = self.state
+            result.reason = "armed_this_cycle"
+            result.measured_joints = measured
+            return result
+
+        self._update_elbow_swivel(buttons, dt)
+        shoulder = self._shoulder_for_sample(sample)
+        human = build_human_arm_state(shoulder, current_vr, self.elbow_swivel_rad, self.human_config, self.previous_elbow)
+        self.previous_elbow = human.elbow_xyz_m.copy()
+        raw_target = human_arm_to_piper_joints(human, self.mimic_config)
+        if self.shoulder_lift_joystick:
+            raw_target[1] = raw_target[1] + analog_axis(buttons, self.shoulder_lift_joystick) * 10.0
+            raw_target = clamp_joints_deg(raw_target)
+        previous = self.mimic_config.neutral_deg if self.last_command_deg is None else self.last_command_deg
+        smoothed = previous + self.mimic_config.smoothing_alpha * (raw_target - previous)
+        safe_target = rate_limit_joints_deg(smoothed, previous, self.mimic_config.max_joint_speed_deg_s, dt)
+        driver.send_joint_pose(safe_target)
+        self.last_command_deg = safe_target.copy()
+        self.state = TeleopState.ACTIVE
+        result.state = self.state
+        result.human_arm = human
+        result.raw_joint_target_deg = raw_target
+        result.safe_joint_target_deg = safe_target
+        result.action = "sent"
+        result.reason = "ok"
+        result.measured_joints = driver.read_joint_pose()
+        return result
+
+    def _estimate_calibrated_shoulder(self, current_vr: np.ndarray, sample: QuestSample) -> np.ndarray:
+        hmd_pose = sample.transforms_openxr.get("hmd")
+        if hmd_pose is None:
+            hmd_pose = sample.transforms_openxr.get("head")
+        if self.human_config.shoulder_source == "hmd" and hmd_pose is not None:
+            return estimate_shoulder_from_hmd(hmd_pose, self.human_config)
+        return np.asarray(current_vr, dtype=float)[:3, 3] + np.asarray(self.human_config.fixed_shoulder_from_hand_home_m, dtype=float)
+
+    def _shoulder_for_sample(self, sample: QuestSample) -> np.ndarray:
+        hmd_pose = sample.transforms_openxr.get("hmd")
+        if hmd_pose is None:
+            hmd_pose = sample.transforms_openxr.get("head")
+        if self.human_config.shoulder_source == "hmd" and hmd_pose is not None:
+            return estimate_shoulder_from_hmd(hmd_pose, self.human_config)
+        if self.fixed_shoulder_xyz_m is None:
+            raise RuntimeError("Joint mimic session is not calibrated")
+        return self.fixed_shoulder_xyz_m.copy()
+
+    def _update_elbow_swivel(self, buttons: dict[str, Any], dt: float) -> None:
+        if self.elbow_swivel_joystick:
+            self.elbow_swivel_rad += analog_axis(buttons, self.elbow_swivel_joystick) * self.human_config.elbow_swivel_speed_rad_s * dt
+            self.elbow_swivel_rad = float(np.clip(self.elbow_swivel_rad, -np.pi, np.pi))
+
+    def _hold(self, driver: Any) -> JointPose | None:
+        driver.hold_joints()
+        measured = driver.read_joint_pose()
+        if measured is not None:
+            self.last_command_deg = measured.joints_deg.copy()
+        return measured
+
+
+def analog_axis(buttons: dict[str, Any], name: str) -> float:
+    if name.endswith("_x") or name.endswith("_y"):
+        base, axis = name.rsplit("_", 1)
+        value = buttons.get(base, (0.0, 0.0))
+        if isinstance(value, (tuple, list)) and len(value) >= 2:
+            return float(value[0 if axis == "x" else 1])
+        return 0.0
+    return analog_value(buttons, name)

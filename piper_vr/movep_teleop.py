@@ -24,10 +24,22 @@ def load_config(path: str | Path) -> dict:
 
 
 def apply_overrides(config: dict, args: argparse.Namespace) -> dict:
+    endpoint = dict(config.get("endpoint_firmware", {}))
+    for key in (
+        "scale",
+        "max_speed_m_s",
+        "max_position_jump_m",
+        "workspace_min_m",
+        "workspace_max_m",
+        "axis_mapping",
+    ):
+        if key in endpoint:
+            config[key] = endpoint[key]
     for attr, key in (
         ("can", "can"),
         ("hz", "hz"),
         ("speed_percent", "speed_percent"),
+        ("control_mode", "control_mode"),
         ("scale", "scale"),
         ("max_speed", "max_speed_m_s"),
         ("side", "side"),
@@ -63,6 +75,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--can")
     parser.add_argument("--hz", type=float)
     parser.add_argument("--speed-percent", type=int)
+    parser.add_argument("--control-mode", choices=("joint_mimic", "endpoint_firmware", "external_ik"), default=None)
     parser.add_argument("--scale", type=float)
     parser.add_argument("--max-speed", type=float)
     parser.add_argument("--side", choices=("left", "right"))
@@ -111,6 +124,9 @@ def _print_verbose(result, driver: PiperDriver, transport_name: str) -> None:
 def main() -> int:
     args = build_parser().parse_args()
     config = apply_overrides(load_config(args.config), args)
+    if config.get("control_mode", "endpoint_firmware") not in ("endpoint_firmware", "external_ik"):
+        print("movep_teleop.py is endpoint-oriented. Use `python -m piper_vr.vr_teleop --control-mode joint_mimic` for joint mimic.")
+        return 2
     hz = float(config.get("hz", 30.0))
     period_s = 1.0 / hz
     side = config.get("side", "right")

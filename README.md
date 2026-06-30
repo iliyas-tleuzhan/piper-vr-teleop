@@ -1,22 +1,18 @@
 # Piper VR Teleop
 
-Piper VR Teleop controls an AgileX Piper arm from a Meta Quest 3 controller. The maintained first-working path is intentionally direct:
+Piper VR Teleop controls an AgileX Piper arm from a Meta Quest 3 controller. The primary mode is now joint-space mimic teleoperation:
 
 ```text
-Quest controller pose -> safety/clutch mapping -> Piper EndPoseCtrl -> Piper firmware endpoint IK
+Quest controller + inferred human arm model -> six Piper joint targets -> JointCtrl
 ```
 
-The robot side preserves the Piper SDK endpoint sequence:
+Endpoint control is still preserved as a fallback/debug mode:
 
-```python
-C_PiperInterface_V2(can)
-arm.ConnectPort()
-arm.EnableArm(7, 0x02)
-arm.ModeCtrl(0x01, 0x00, speed_percent, 0x00)
-arm.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
+```text
+Quest controller pose -> safety/clutch mapping -> EndPoseCtrl -> Piper firmware endpoint IK
 ```
 
-No host-side Jacobian IK solver is used in the default teleop path. The optional URDF guard is off by default.
+Use `joint_mimic` when the goal is whole-arm teleoperation. Use `endpoint_firmware` when you only need to move the gripper endpoint and are comfortable letting Piper firmware choose the internal joint posture. `external_ik` is an optional host-side path for endpoint targets plus posture objectives; it sends `JointCtrl` results rather than relying on firmware endpoint IK.
 
 ## Hardware
 
@@ -36,83 +32,66 @@ conda activate piper-vr
 pip install -r requirements.txt
 sudo apt update
 sudo apt install android-tools-adb can-utils
-```
-
-Install the Quest reader:
-
-```bash
 scripts/install_oculus_reader.sh
 ```
 
-If direct install fails, use the legacy fallback:
-
-```bash
-cd ~
-git clone https://github.com/agilexrobotics/questVR_ws.git
-export PYTHONPATH=~/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
-python3 -c "import oculus_reader; print('oculus_reader ok')"
-```
-
-Install the Quest teleop APK:
-
-```bash
-mkdir -p third_party/APK
-# Place teleop-debug.apk at third_party/APK/teleop-debug.apk
-scripts/install_quest_apk.sh
-```
-
-Connect the Quest by USB, put on the headset, and accept USB debugging.
+Install the Quest teleop APK, connect the Quest by USB, put on the headset, and accept USB debugging.
 
 ## Required Test Order
 
 ```bash
+cd ~/Iliyas/piper-vr-teleop
+export PYTHONPATH=$PWD:$HOME/Iliyas/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
+
 scripts/setup_can.sh can0 1000000
+
 python3 scripts/test_piper_endpoint.py --can can0 --speed-percent 5 --dz 0.02
-python3 scripts/check_quest_transport.py --transport adb_logcat --seconds 10
-python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --dry-run --verbose
-python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --can can0 --speed-percent 5 --scale 0.40 --max-speed 0.05 --verbose
+python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 3
+
+python3 scripts/check_quest_transport.py --seconds 10
+python3 scripts/debug_human_arm_model.py --side right
+
+python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --dry-run --verbose
+python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --can can0 --speed-percent 5 --verbose
 ```
 
-`can0` is only an example. Use any interface name your system provides, including `can1` or `can_piper`.
+`can0` is only an example. Use the CAN interface name your system provides.
 
 ## Controls
 
 - Right controller controls the single Piper by default.
-- `A` calibrates the current controller pose to the measured Piper endpoint pose.
+- `A` calibrates the current controller/shoulder estimate and measured Piper joint pose.
 - After calibration, release and press `rightGrip` before motion starts.
-- Each new deadman press creates a clutch anchor from the measured robot pose.
-- Releasing the deadman holds at the measured current endpoint pose.
+- Each new deadman press creates a clutch anchor.
+- Releasing the deadman holds the measured current joint pose in `joint_mimic`.
+- Right joystick X adjusts elbow swivel when configured as `rightJS_x`.
 - Right trigger controls the gripper only when `gripper_enabled: true`.
 
 ## Safety Defaults
 
 - No motion before calibration.
 - No motion without the deadman.
-- Stale Quest samples hold position and require a deadman re-press.
-- Workspace clamp, speed limit, max jump limit, deadband, and smoothing are enabled.
-- Orientation control is off by default.
-- URDF guarding is off by default; enable it only with `--urdf-guard`.
-
-## Quest Transport
-
-ADB/logcat plus `oculus_reader` is the primary transport because it matches the existing Quest APK workflow and keeps first motion simple. Wireless ADB is supported by passing `--quest-ip <ip>` after pairing the headset. ROS topics and WebRTC are documented as future integration paths, not the default route for first Piper motion.
+- Deadman release holds measured robot pose.
+- Stale Quest samples hold measured robot pose and require a deadman re-press.
+- Joint targets are clamped to documented Piper joint limits.
+- Joint speeds are rate-limited per joint.
+- Ctrl+C commands a clean hold.
+- If joint feedback is unavailable, the driver warns and falls back to the last joint command only for hold.
 
 ## Useful Commands
 
 ```bash
-python3 scripts/check_quest_transport.py --transport adb_logcat --seconds 10
-scripts/check_adb_logcat.sh
-python3 scripts/print_vr_xyz.py --seconds 10
-python3 scripts/print_piper_pose.py --can can0
+python3 scripts/print_piper_joints.py --can can0
+python3 scripts/debug_human_arm_model.py --side right --dry-run
+python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --control-mode endpoint_firmware --dry-run --verbose
 python3 -m piper_vr.dual_movep_teleop --config configs/dual_piper.yaml --dry-run
 ```
 
 ## Documentation
 
-- [New laptop setup](docs/NEW_LAPTOP_SETUP.md)
-- [Quest setup](docs/QUEST_SETUP.md)
-- [CAN setup](docs/CAN_SETUP.md)
+- [Joint mimic teleop](docs/JOINT_MIMIC_TELEOP.md)
 - [How it works](docs/HOW_IT_WORKS.md)
 - [Axis mapping](docs/AXIS_MAPPING.md)
 - [Troubleshooting](docs/TROUBLESHOOTING.md)
-- [Upstream notes](docs/UPSTREAM_NOTES.md)
+- [Quest setup](docs/QUEST_SETUP.md)
+- [CAN setup](docs/CAN_SETUP.md)

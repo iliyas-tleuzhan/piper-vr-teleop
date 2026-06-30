@@ -1,13 +1,14 @@
 # Axis Mapping
 
-Axis mapping lives in `configs/single_piper.yaml`:
+Endpoint axis mapping lives under `endpoint_firmware` in `configs/single_piper.yaml`:
 
 ```yaml
-axis_mapping:
-  translation_frame: "controller_home"
-  piper_x: "-vr_z"
-  piper_y: "-vr_x"
-  piper_z: "+vr_y"
+endpoint_firmware:
+  axis_mapping:
+    translation_frame: "controller_home"
+    piper_x: "-vr_z"
+    piper_y: "-vr_x"
+    piper_z: "+vr_y"
 ```
 
 Each output axis can read one Quest axis with a sign:
@@ -49,3 +50,24 @@ axis_mapping:
 ```
 
 Tune in dry-run first, then test at low speed with the robot workspace clear.
+
+## Joint Mimic Axes
+
+`joint_mimic` does not use endpoint XYZ axis mapping. It maps inferred human arm angles to Piper joints:
+
+- joint 1: shoulder yaw/horizontal sweep
+- joint 2: shoulder lift
+- joint 3: elbow flexion into Piper's negative elbow range
+- joint 4: wrist/forearm roll
+- joint 5: wrist pitch
+- joint 6: wrist yaw/roll depending on real Piper axis behavior
+
+Tune these with:
+
+```yaml
+joint_mimic:
+  neutral_deg: [0.0, 90.0, -90.0, 0.0, 0.0, 0.0]
+  offsets_deg: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  signs: [1, 1, 1, 1, 1, 1]
+  gains: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+```
