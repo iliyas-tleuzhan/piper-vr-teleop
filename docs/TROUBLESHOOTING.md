@@ -37,6 +37,13 @@ Inspect `state`, `calibrated`, `human_vector_deg`, `human_delta_deg`, `target_jo
 
 Joint mimic is calibration-relative. `A` calibrates, and every fresh `rightGrip` press re-anchors the clutch. If you move the controller while the deadman is released, the next grip should not jump the robot.
 
+## Why the old movement felt wrong
+
+- Raw controller Euler angles caused wrist twisting.
+- Absolute pose-delta mapping caused direction changes when the control frame was not calibrated.
+- Rate limiting could make Piper continue moving after the controller stopped.
+- The default now uses relative controller deltas, deadband, backlog cancellation, and disabled wrist rotation.
+
 ## Joint feedback is unavailable
 
 Run:
@@ -72,7 +79,7 @@ Tune signs and gains in dry-run before using the real robot.
 Use the mapping debugger before real teleop:
 
 ```bash
-python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A
+python3 scripts/calibrate_relative_mapping.py --side right --calibrate-button A
 ```
 
 Use manual joint tuning at low speed for hardware sign/gain work:

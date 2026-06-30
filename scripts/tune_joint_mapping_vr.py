@@ -36,8 +36,45 @@ def main() -> int:
     parser.add_argument("--max-speed-deg-s", type=float, default=5.0)
     parser.add_argument("--delta-scale", type=float, default=1.0)
     parser.add_argument("--log-dir", default="logs/joint_tuning")
+    parser.add_argument("--gain-mode", action="store_true", help="tune a relative_gain_matrix entry instead of moving the robot")
+    parser.add_argument("--input-channel", choices=("dx", "dy", "dz", "droll", "dpitch", "dyaw"), default="dx")
+    parser.add_argument("--gain-step", type=float, default=1.0)
+    parser.add_argument("--save-patch", default="configs/local_relative_mapping.yaml")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+
+    if args.gain_mode:
+        import yaml
+
+        from piper_vr.joint_mimic import JointMimicConfig
+
+        config_path = Path("configs/single_piper.yaml")
+        config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        mimic = JointMimicConfig.from_config(config.get("joint_mimic"))
+        channels = {"dx": 0, "dy": 1, "dz": 2, "droll": 3, "dpitch": 4, "dyaw": 5}
+        row = int(args.joint) - 1
+        col = channels[args.input_channel]
+        gain = float(mimic.relative_gain_matrix[row, col])
+        print("Gain tuning mode. rightJS_y adjusts gain; A saves patch; Ctrl+C prints suggestion.")
+        quest = QuestReader(simulate_on_missing=args.dry_run)
+        try:
+            while True:
+                sample = quest.get_sample()
+                buttons = {} if sample is None else sample.buttons
+                gain += _axis(buttons, "rightJS", 1) * args.gain_step / max(args.rate, 1.0)
+                mimic.relative_gain_matrix[row, col] = gain
+                print(f"joint={row + 1} channel={args.input_channel} gain={gain:.3f}")
+                if is_pressed(buttons, "A"):
+                    patch = {"joint_mimic": {"relative_gain_matrix": mimic.relative_gain_matrix.tolist()}}
+                    Path(args.save_patch).write_text(yaml.safe_dump(patch, sort_keys=False), encoding="utf-8")
+                    print(f"Saved {args.save_patch}")
+                    time.sleep(0.5)
+                time.sleep(1.0 / args.rate)
+        except KeyboardInterrupt:
+            print("\nSuggested joint_mimic.relative_gain_matrix:")
+            print(yaml.safe_dump(mimic.relative_gain_matrix.tolist(), sort_keys=False))
+            quest.stop()
+        return 0
 
     quest = QuestReader(simulate_on_missing=args.dry_run)
     driver = PiperDriver(can=args.can, speed_percent=args.speed_percent, dry_run=args.dry_run)

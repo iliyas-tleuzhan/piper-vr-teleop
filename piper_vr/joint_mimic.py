@@ -19,6 +19,17 @@ class JointMimicConfig:
     max_joint_speed_deg_s: np.ndarray
     smoothing_alpha: float
     idle_hold_hz: float = 0.0
+    mapping_mode: str = "pose_delta"
+    control_frame: str = "hmd_yaw"
+    translation_deadband_m: float = 0.003
+    rotation_deadband_deg: float = 2.0
+    settle_frames_on_stop: int = 3
+    cancel_backlog_on_stop: bool = True
+    relative_gain_matrix: np.ndarray | None = None
+    wrist_rotation_enabled: bool = False
+    wrist_rotation_deadman: str = "rightTrig"
+    max_tracking_error_deg: float = 12.0
+    tracking_error_fault_frames: int = 10
 
     @classmethod
     def from_config(cls, config: dict | None) -> "JointMimicConfig":
@@ -31,6 +42,27 @@ class JointMimicConfig:
             max_joint_speed_deg_s=np.asarray(config.get("max_joint_speed_deg_s", [25, 25, 25, 45, 45, 60]), dtype=float),
             smoothing_alpha=float(config.get("smoothing_alpha", 0.25)),
             idle_hold_hz=float(config.get("idle_hold_hz", 0.0)),
+            mapping_mode=str(config.get("mapping_mode", "pose_delta")),
+            control_frame=str(config.get("control_frame", "hmd_yaw")),
+            translation_deadband_m=float(config.get("translation_deadband_m", 0.003)),
+            rotation_deadband_deg=float(config.get("rotation_deadband_deg", 2.0)),
+            settle_frames_on_stop=int(config.get("settle_frames_on_stop", 3)),
+            cancel_backlog_on_stop=bool(config.get("cancel_backlog_on_stop", True)),
+            relative_gain_matrix=np.asarray(config.get(
+                "relative_gain_matrix",
+                [
+                    [30.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 30.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, -30.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                ],
+            ), dtype=float),
+            wrist_rotation_enabled=bool(config.get("wrist_rotation_enabled", False)),
+            wrist_rotation_deadman=str(config.get("wrist_rotation_deadman", "rightTrig")),
+            max_tracking_error_deg=float(config.get("max_tracking_error_deg", 12.0)),
+            tracking_error_fault_frames=int(config.get("tracking_error_fault_frames", 10)),
         )
 
     def __post_init__(self) -> None:
@@ -43,6 +75,19 @@ class JointMimicConfig:
             raise ValueError("smoothing_alpha must be in the range (0, 1]")
         if self.idle_hold_hz < 0.0:
             raise ValueError("idle_hold_hz must be non-negative")
+        if self.mapping_mode not in ("pose_delta", "relative_delta", "relative_ik_posture"):
+            raise ValueError("mapping_mode must be pose_delta, relative_delta, or relative_ik_posture")
+        if self.translation_deadband_m < 0.0 or self.rotation_deadband_deg < 0.0:
+            raise ValueError("deadbands must be non-negative")
+        if self.settle_frames_on_stop < 1:
+            raise ValueError("settle_frames_on_stop must be >= 1")
+        if self.tracking_error_fault_frames < 1:
+            raise ValueError("tracking_error_fault_frames must be >= 1")
+        if self.max_tracking_error_deg < 0.0:
+            raise ValueError("max_tracking_error_deg must be non-negative")
+        self.relative_gain_matrix = np.asarray(self.relative_gain_matrix, dtype=float)
+        if self.relative_gain_matrix.shape != (6, 6):
+            raise ValueError("relative_gain_matrix must have shape (6, 6)")
 
 
 def human_arm_to_mimic_vector_deg(human: HumanArmState) -> np.ndarray:

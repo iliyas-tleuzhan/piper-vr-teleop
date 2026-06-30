@@ -16,16 +16,30 @@ OCULUS_LOG_TAG = "wE9ryARX"
 OCULUS_PACKAGE = "com.rail.oculus.teleop"
 
 
-def normalize_side_keys(transforms: dict[str, Any] | None) -> dict[str, np.ndarray]:
+def normalize_transform_keys(transforms: dict[str, Any] | None) -> dict[str, np.ndarray]:
     output: dict[str, np.ndarray] = {}
     for key, value in (transforms or {}).items():
-        side = {"r": "right", "right": "right", "l": "left", "left": "left"}.get(str(key).lower())
-        if side is None:
+        raw_key = str(key).lower()
+        normalized_key = {
+            "r": "right",
+            "right": "right",
+            "l": "left",
+            "left": "left",
+            "hmd": "hmd",
+            "head": "hmd",
+            "headset": "hmd",
+        }.get(raw_key, raw_key)
+        if not normalized_key:
             continue
         matrix = np.asarray(value, dtype=float)
         if matrix.shape == (4, 4):
-            output[side] = matrix
+            output[normalized_key] = matrix
     return output
+
+
+def normalize_side_keys(transforms: dict[str, Any] | None) -> dict[str, np.ndarray]:
+    """Backward-compatible alias for older imports."""
+    return normalize_transform_keys(transforms)
 
 
 def parse_oculus_payload(payload: str) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
@@ -67,7 +81,7 @@ def parse_oculus_payload(payload: str) -> tuple[dict[str, np.ndarray], dict[str,
                     buttons[key] = token
         else:
             buttons[key] = tuple(float(item) for item in items)
-    return normalize_side_keys(transforms), normalize_buttons(buttons)
+    return normalize_transform_keys(transforms), normalize_buttons(buttons)
 
 
 @dataclass
@@ -129,7 +143,7 @@ class AdbLogcatTransport:
         if self.reader is None:
             self.start()
         transformations, buttons = self.reader.get_transformations_and_buttons()
-        transforms = normalize_side_keys(transformations)
+        transforms = normalize_transform_keys(transformations)
         if transforms:
             now_s = time.monotonic()
             self.last_update_s = now_s
@@ -209,4 +223,5 @@ class SimulatedQuestReader:
         left = np.eye(4)
         left[:3, 3] = [-0.02 * np.sin(t), 0.02 * np.cos(t), 0.01 * np.sin(t * 0.5)]
         buttons = {"A": t < 0.4, "rightGrip": (1.0 if t > 0.8 else 0.0,), "rightTrig": (0.0,)}
-        return {"r": right, "l": left}, normalize_buttons(buttons)
+        hmd = np.eye(4)
+        return {"r": right, "l": left, "hmd": hmd}, normalize_buttons(buttons)

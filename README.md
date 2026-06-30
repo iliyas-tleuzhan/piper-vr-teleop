@@ -16,6 +16,15 @@ Use `joint_mimic` when the goal is whole-arm teleoperation. It is still approxim
 
 Joint mimic is calibration-relative. Pressing `A` only calibrates; every new `rightGrip` press creates a new clutch anchor. If you move the controller while the deadman is released, the robot should not jump when you grip again.
 
+The default `joint_mimic` mapping is now `relative_delta`: each frame uses small controller motion in a calibrated HMD-yaw/control frame to increment the robot joint target. Wrist rotation is disabled by default until explicitly tuned.
+
+## Why the old movement felt wrong
+
+- Raw controller Euler angles caused unexpected wrist twisting.
+- Absolute pose-delta mapping made horizontal/forward directions depend too much on poorly calibrated frames.
+- Rate limiting could leave a target backlog, so Piper kept moving after the controller stopped.
+- The default path now uses relative controller deltas, deadband, backlog cancellation on stop, and disabled wrist rotation.
+
 ## Hardware
 
 - AgileX Piper arm
@@ -43,20 +52,15 @@ Install the Quest teleop APK, connect the Quest by USB, put on the headset, and 
 
 ```bash
 cd ~/Iliyas/piper-vr-teleop
+git pull origin main
 export PYTHONPATH=$PWD:$HOME/Iliyas/questVR_ws/src/oculus_reader/scripts:$PYTHONPATH
 
-scripts/setup_can.sh can0 1000000
-
-python3 scripts/test_piper_endpoint.py --can can0 --speed-percent 5 --dz 0.02
-python3 scripts/inspect_piper_sdk_feedback.py --can can0
+python3 scripts/check_quest_transport.py --seconds 10
+python3 scripts/calibrate_relative_mapping.py --side right --calibrate-button A
 python3 scripts/print_piper_joints.py --can can0 --debug-feedback
 python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 3 --duration 3 --rate 50
+python3 scripts/tune_joint_mapping_vr.py --can can0 --dry-run
 
-python3 scripts/check_quest_transport.py --seconds 10
-python3 scripts/debug_human_arm_model.py --side right
-python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A
-
-python3 scripts/run_dry.py
 python3 -m piper_vr.vr_teleop
 ```
 
@@ -92,6 +96,7 @@ python3 scripts/run_real.py
 python3 scripts/run_dry.py
 scripts/run_real.sh
 scripts/run_dry.sh
+python3 scripts/calibrate_relative_mapping.py --side right --calibrate-button A
 python3 -m piper_vr.vr_teleop --can can1
 python3 -m piper_vr.vr_teleop --max-joint-speed 10
 python3 -m piper_vr.vr_teleop --quiet --no-log

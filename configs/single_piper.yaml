@@ -31,6 +31,12 @@ human_arm:
   elbow_swivel_speed_deg_s: 60.0
 
 joint_mimic:
+  mapping_mode: "relative_delta"
+  control_frame: "hmd_yaw"
+  translation_deadband_m: 0.003
+  rotation_deadband_deg: 2.0
+  settle_frames_on_stop: 3
+  cancel_backlog_on_stop: true
   neutral_deg: [0.0, 90.0, -90.0, 0.0, 0.0, 0.0]
   offsets_deg: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   signs: [1, 1, 1, 1, 1, 1]
@@ -38,6 +44,17 @@ joint_mimic:
   max_joint_speed_deg_s: [5, 5, 5, 5, 5, 5]
   smoothing_alpha: 0.25
   idle_hold_hz: 0.0
+  relative_gain_matrix:
+    - [30.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    - [0.0, 0.0, 30.0, 0.0, 0.0, 0.0]
+    - [0.0, 0.0, -30.0, 0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  wrist_rotation_enabled: false
+  wrist_rotation_deadman: "rightTrig"
+  max_tracking_error_deg: 12.0
+  tracking_error_fault_frames: 10
 
 endpoint_firmware:
   scale: 0.40
