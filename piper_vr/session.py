@@ -12,7 +12,7 @@ import numpy as np
 from .buttons import analog_value, is_pressed
 from .human_arm_model import HumanArmConfig, HumanArmState, build_human_arm_state, estimate_shoulder_from_hmd
 from .joint_limits import clamp_joints_deg, rate_limit_joints_deg
-from .joint_mimic import JointMimicConfig, human_arm_to_piper_joints
+from .joint_mimic import JointMimicConfig, human_arm_to_mimic_vector_deg, mimic_vector_to_piper_joints
 from .piper_driver import EndPose, JointPose
 from .safety import OrientationLimiter, SafetyLimiter, SignalFilter
 from .types import QuestSample, TeleopState
@@ -33,6 +33,10 @@ class SessionResult:
     reason: str = "none"
     piper_pose: EndPose | None = None
     human_arm: HumanArmState | None = None
+    human_vector_deg: np.ndarray | None = None
+    human_home_vector_deg: np.ndarray | None = None
+    human_delta_deg: np.ndarray | None = None
+    robot_home_joints_deg: np.ndarray | None = None
     raw_joint_target_deg: np.ndarray | None = None
     safe_joint_target_deg: np.ndarray | None = None
     measured_joints: JointPose | None = None
@@ -270,7 +274,8 @@ class JointMimicSession:
         self.state = TeleopState.WAITING_FOR_DEVICE
         self.controller_home: np.ndarray | None = None
         self.fixed_shoulder_xyz_m: np.ndarray | None = None
-        self.measured_home_joints_deg: np.ndarray | None = None
+        self.robot_home_joints_deg: np.ndarray | None = None
+        self.human_home_vector_deg: np.ndarray | None = None
         self.last_command_deg: np.ndarray | None = None
         self.previous_elbow: np.ndarray | None = None
         self.elbow_swivel_rad = float(human_config.elbow_swivel_default_rad)
@@ -281,7 +286,12 @@ class JointMimicSession:
 
     @property
     def calibrated(self) -> bool:
-        return self.controller_home is not None and self.fixed_shoulder_xyz_m is not None
+        return (
+            self.controller_home is not None
+            and self.fixed_shoulder_xyz_m is not None
+            and self.robot_home_joints_deg is not None
+            and self.human_home_vector_deg is not None
+        )
 
     def step(self, sample: QuestSample | None, driver: Any) -> SessionResult:
         now_s = time.monotonic()
@@ -312,21 +322,42 @@ class JointMimicSession:
             return result
 
         if sample.age_s > self.stale_timeout_s:
-            measured = self._hold(driver)
+            measured, action, reason = self._hold(driver)
             self.state = TeleopState.HOLDING
             self.require_deadman_repress = True
             self.was_deadman_pressed = deadman
             result.state = self.state
             result.reason = "tracking_stale"
+            result.action = action
+            if reason != "ok":
+                result.reason = reason
+                self.state = TeleopState.FAULT
+                result.state = self.state
             result.measured_joints = measured
             return result
 
         if calibrate and not self.was_calibrate_pressed:
-            measured = self._hold(driver)
+            measured = driver.read_joint_pose()
+            if measured is None:
+                if not getattr(driver, "dry_run", False):
+                    self.state = TeleopState.WAITING_FOR_CALIBRATION
+                    result.state = self.state
+                    result.reason = "joint_feedback_required_for_calibration"
+                    self.was_calibrate_pressed = calibrate
+                    return result
+                measured = JointPose(self.mimic_config.neutral_deg.copy())
             self.controller_home = np.asarray(current_vr, dtype=float).copy()
             self.fixed_shoulder_xyz_m = self._estimate_calibrated_shoulder(current_vr, sample)
-            self.measured_home_joints_deg = None if measured is None else measured.joints_deg.copy()
-            self.last_command_deg = self.mimic_config.neutral_deg.copy() if measured is None else measured.joints_deg.copy()
+            human_home = build_human_arm_state(
+                self.fixed_shoulder_xyz_m,
+                current_vr,
+                self.elbow_swivel_rad,
+                self.human_config,
+                None,
+            )
+            self.robot_home_joints_deg = measured.joints_deg.copy()
+            self.human_home_vector_deg = human_arm_to_mimic_vector_deg(human_home)
+            self.last_command_deg = self.robot_home_joints_deg.copy()
             self.previous_elbow = None
             self.elbow_swivel_rad = float(self.human_config.elbow_swivel_default_rad)
             self.require_deadman_repress = True
@@ -336,6 +367,11 @@ class JointMimicSession:
             result.calibrated = True
             result.reason = "calibrated_release_deadman"
             result.measured_joints = measured
+            result.human_arm = human_home
+            result.human_vector_deg = self.human_home_vector_deg.copy()
+            result.human_home_vector_deg = self.human_home_vector_deg.copy()
+            result.human_delta_deg = np.zeros(6)
+            result.robot_home_joints_deg = self.robot_home_joints_deg.copy()
             self.was_calibrate_pressed = calibrate
             return result
         self.was_calibrate_pressed = calibrate
@@ -347,12 +383,13 @@ class JointMimicSession:
             return result
 
         if not deadman:
-            measured = self._hold(driver)
-            self.state = TeleopState.READY_IDLE
+            measured, action, reason = self._hold(driver)
+            self.state = TeleopState.READY_IDLE if reason == "ok" else TeleopState.FAULT
             self.was_deadman_pressed = False
             self.require_deadman_repress = False
             result.state = self.state
-            result.reason = "deadman_released"
+            result.action = action
+            result.reason = "deadman_released" if reason == "ok" else reason
             result.measured_joints = measured
             return result
 
@@ -381,7 +418,13 @@ class JointMimicSession:
         shoulder = self._shoulder_for_sample(sample)
         human = build_human_arm_state(shoulder, current_vr, self.elbow_swivel_rad, self.human_config, self.previous_elbow)
         self.previous_elbow = human.elbow_xyz_m.copy()
-        raw_target = human_arm_to_piper_joints(human, self.mimic_config)
+        human_vector = human_arm_to_mimic_vector_deg(human)
+        if self.human_home_vector_deg is None or self.robot_home_joints_deg is None:
+            self.state = TeleopState.FAULT
+            result.state = self.state
+            result.reason = "missing_joint_mimic_calibration"
+            return result
+        raw_target = mimic_vector_to_piper_joints(human_vector, self.human_home_vector_deg, self.robot_home_joints_deg, self.mimic_config)
         if self.shoulder_lift_joystick:
             raw_target[1] = raw_target[1] + analog_axis(buttons, self.shoulder_lift_joystick) * 10.0
             raw_target = clamp_joints_deg(raw_target)
@@ -393,6 +436,10 @@ class JointMimicSession:
         self.state = TeleopState.ACTIVE
         result.state = self.state
         result.human_arm = human
+        result.human_vector_deg = human_vector
+        result.human_home_vector_deg = self.human_home_vector_deg.copy()
+        result.human_delta_deg = human_vector - self.human_home_vector_deg
+        result.robot_home_joints_deg = self.robot_home_joints_deg.copy()
         result.raw_joint_target_deg = raw_target
         result.safe_joint_target_deg = safe_target
         result.action = "sent"
@@ -423,12 +470,16 @@ class JointMimicSession:
             self.elbow_swivel_rad += analog_axis(buttons, self.elbow_swivel_joystick) * self.human_config.elbow_swivel_speed_rad_s * dt
             self.elbow_swivel_rad = float(np.clip(self.elbow_swivel_rad, -np.pi, np.pi))
 
-    def _hold(self, driver: Any) -> JointPose | None:
-        driver.hold_joints()
+    def _hold(self, driver: Any) -> tuple[JointPose | None, str, str]:
         measured = driver.read_joint_pose()
         if measured is not None:
             self.last_command_deg = measured.joints_deg.copy()
-        return measured
+            driver.send_joint_pose(measured.joints_deg)
+            return measured, "sent", "ok"
+        if getattr(driver, "has_sent_joint_command", False) and self.last_command_deg is not None:
+            driver.hold_joints(allow_last_command_fallback=True)
+            return None, "sent", "ok"
+        return None, "skipped", "joint_feedback_required_for_hold"
 
 
 def analog_axis(buttons: dict[str, Any], name: str) -> float:

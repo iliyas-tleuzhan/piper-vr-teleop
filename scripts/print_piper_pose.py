@@ -15,7 +15,7 @@ def main() -> int:
     parser.add_argument("--hz", type=float, default=5.0)
     args = parser.parse_args()
     driver = PiperDriver(can=args.can, dry_run=False)
-    driver.connect()
+    driver.connect(initial_mode="endpoint")
     period = 1.0 / args.hz
     while True:
         pose = driver.read_end_pose()

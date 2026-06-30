@@ -9,7 +9,7 @@ The mode is selected by `control_mode`:
 ## Joint Mimic Path
 
 ```text
-QuestSample -> JointMimicSession -> HumanArmState -> human_arm_to_piper_joints -> JointCtrl
+QuestSample -> JointMimicSession -> HumanArmState -> mimic vector delta -> JointCtrl
 ```
 
 The Quest controller gives hand pose. A Quest controller alone does not directly measure the operator shoulder or elbow, so `piper_vr/human_arm_model.py` estimates them:
@@ -19,7 +19,15 @@ The Quest controller gives hand pose. A Quest controller alone does not directly
 - Elbow position is solved from shoulder-to-wrist geometry, arm lengths, previous elbow state, and elbow swivel.
 - Wrist orientation comes from controller orientation.
 
-The resulting `HumanArmState` is mapped to six Piper joint angles through configurable neutral positions, signs, gains, offsets, smoothing, and per-joint speed limits.
+The resulting `HumanArmState` is converted to six human posture channels: shoulder yaw, shoulder pitch, elbow flexion, shoulder/forearm roll, wrist pitch, and wrist yaw. At calibration, those channels are stored as `human_home_vector_deg` and measured Piper feedback is stored as `robot_home_joints_deg`.
+
+Runtime targets are calibration-relative:
+
+```text
+target = robot_home + offsets + signs * gains * (human_vector - human_home_vector)
+```
+
+The target is clamped to Piper joint limits, smoothed, rate-limited, and sent through `JointCtrl`. Real calibration is refused if measured joint feedback is unavailable.
 
 ## Endpoint Firmware Path
 
@@ -40,7 +48,7 @@ Both runtime paths use the same state names:
 - `HOLDING`
 - `FAULT`
 
-Calibration records the controller home, shoulder estimate, and measured robot pose. Motion is disarmed immediately after calibration, so the operator must release and re-press the deadman.
+Calibration records the controller home, shoulder estimate, human posture vector, and measured robot pose. Motion is disarmed immediately after calibration, so the operator must release and re-press the deadman.
 
 ## Units
 

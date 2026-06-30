@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -41,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--orientation-enabled", action="store_true")
     parser.add_argument("--joint-mimic-only", action="store_true")
     parser.add_argument("--endpoint-fallback", action="store_true")
+    parser.add_argument("--log", action="store_true")
+    parser.add_argument("--log-dir", default="logs/joint_mimic")
     return parser
 
 
@@ -83,6 +87,9 @@ def _print_joint_verbose(result, driver: PiperDriver, transport_name: str) -> No
         f"human_shoulder_deg={_format_array(None if human is None else human.shoulder_angles_deg, 2)} "
         f"elbow_flex_deg={None if human is None else round(human.elbow_flex_deg, 2)} "
         f"wrist_deg={_format_array(None if human is None else human.wrist_angles_deg, 2)} "
+        f"human_vector_deg={_format_array(result.human_vector_deg, 2)} "
+        f"human_delta_deg={_format_array(result.human_delta_deg, 2)} "
+        f"robot_home_joints_deg={_format_array(result.robot_home_joints_deg, 2)} "
         f"target_joints_deg={_format_array(result.raw_joint_target_deg, 2)} "
         f"safe_joints_deg={_format_array(result.safe_joint_target_deg, 2)} "
         f"action={'JointCtrl sent' if result.action == 'sent' else 'skipped:' + result.reason} "
@@ -90,6 +97,44 @@ def _print_joint_verbose(result, driver: PiperDriver, transport_name: str) -> No
         f"quest_age_s={None if result.sample_age_s is None else round(result.sample_age_s, 3)} "
         f"transport={transport_name}"
     )
+
+
+class JointMimicJsonlLogger:
+    def __init__(self, log_dir: str | Path) -> None:
+        directory = Path(log_dir)
+        directory.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.path = directory / f"joint_mimic_{stamp}.jsonl"
+        self._handle = self.path.open("a", encoding="utf-8")
+
+    def write(self, result) -> None:
+        human = result.human_arm
+
+        def arr(value):
+            return None if value is None else np.asarray(value, dtype=float).round(6).tolist()
+
+        row = {
+            "timestamp": time.time(),
+            "state": result.state.value,
+            "controller_xyz": arr(result.controller_xyz),
+            "shoulder_xyz": arr(None if human is None else human.shoulder_xyz_m),
+            "elbow_xyz": arr(None if human is None else human.elbow_xyz_m),
+            "wrist_xyz": arr(None if human is None else human.wrist_xyz_m),
+            "human_vector_deg": arr(result.human_vector_deg),
+            "human_home_vector_deg": arr(result.human_home_vector_deg),
+            "human_delta_deg": arr(result.human_delta_deg),
+            "robot_home_joints_deg": arr(result.robot_home_joints_deg),
+            "target_joints_deg": arr(result.raw_joint_target_deg),
+            "safe_joints_deg": arr(result.safe_joint_target_deg),
+            "measured_joints_deg": arr(None if result.measured_joints is None else result.measured_joints.joints_deg),
+            "action": result.action,
+            "reason": result.reason,
+        }
+        self._handle.write(json.dumps(row, separators=(",", ":")) + "\n")
+        self._handle.flush()
+
+    def close(self) -> None:
+        self._handle.close()
 
 
 def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
@@ -115,13 +160,12 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
         simulate_on_missing=args.dry_run,
     )
     driver = PiperDriver(can=config.get("can", "can0"), speed_percent=int(config.get("speed_percent", 5)), dry_run=args.dry_run)
-    driver.connect()
-    driver.set_move_j_mode()
+    driver.connect(initial_mode="joint")
     measured = driver.read_joint_pose()
     if measured is not None:
         print(f"Measured Piper joints: {measured.joints_deg.round(2).tolist()}")
     else:
-        print("WARNING: Piper joint feedback unavailable; holds will fall back to the last joint command.")
+        print("WARNING: Piper joint feedback unavailable. Real joint mimic calibration will be refused until feedback works.")
 
     human_config = HumanArmConfig.from_config({**config.get("human_arm", {}), "side": side})
     mimic_config = JointMimicConfig.from_config(config.get("joint_mimic"))
@@ -137,18 +181,25 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
     )
 
     next_verbose_s = 0.0
+    logger = JointMimicJsonlLogger(args.log_dir) if args.log else None
+    if logger is not None:
+        print(f"Logging joint mimic JSONL to {logger.path}")
     try:
         while True:
             loop_start = time.monotonic()
             result = session.step(quest.get_sample(), driver)
+            if logger is not None:
+                logger.write(result)
             if args.verbose and time.monotonic() >= next_verbose_s:
                 next_verbose_s = time.monotonic() + 0.2
                 _print_joint_verbose(result, driver, transport_name)
             time.sleep(max(0.0, period_s - (time.monotonic() - loop_start)))
     except KeyboardInterrupt:
         print("\nCtrl+C received. Holding at the measured joint pose.")
-        driver.hold_joints()
+        driver.hold_joints(allow_last_command_fallback=True)
         quest.stop()
+        if logger is not None:
+            logger.close()
         return 0
 
 

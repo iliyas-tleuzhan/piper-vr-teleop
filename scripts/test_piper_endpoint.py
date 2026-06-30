@@ -20,7 +20,7 @@ def main() -> int:
 
     driver = PiperDriver(can=args.can, speed_percent=args.speed_percent, dry_run=False)
     try:
-        driver.connect()
+        driver.connect(initial_mode="endpoint")
         start_pose = driver.read_end_pose()
         if start_pose is None:
             raise RuntimeError("Could not read Piper endpoint pose after connecting.")

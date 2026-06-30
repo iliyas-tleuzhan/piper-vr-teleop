@@ -158,7 +158,7 @@ def main() -> int:
         speed_percent=int(config.get("speed_percent", 5)),
         dry_run=args.dry_run,
     )
-    driver.connect()
+    driver.connect(initial_mode="endpoint")
     measured = driver.read_end_pose()
     if measured is not None:
         print(f"Measured Piper endpoint: xyz_m={measured.xyz_m.round(4).tolist()} rpy_deg={measured.rpy_deg.round(2).tolist()}")

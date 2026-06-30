@@ -12,7 +12,7 @@ Endpoint control is still preserved as a fallback/debug mode:
 Quest controller pose -> safety/clutch mapping -> EndPoseCtrl -> Piper firmware endpoint IK
 ```
 
-Use `joint_mimic` when the goal is whole-arm teleoperation. Use `endpoint_firmware` when you only need to move the gripper endpoint and are comfortable letting Piper firmware choose the internal joint posture. `external_ik` is an optional host-side path for endpoint targets plus posture objectives; it sends `JointCtrl` results rather than relying on firmware endpoint IK.
+Use `joint_mimic` when the goal is whole-arm teleoperation. It is still approximate because the Quest controller does not directly measure the shoulder or elbow, but the final robot command is six simultaneous joint angles through `JointCtrl`, not firmware endpoint IK. Use `endpoint_firmware` when you only need to move the gripper endpoint and are comfortable letting Piper firmware choose the internal joint posture. `external_ik` is an optional host-side path for endpoint targets plus posture objectives; it sends `JointCtrl` results rather than relying on firmware endpoint IK.
 
 ## Hardware
 
@@ -46,13 +46,16 @@ export PYTHONPATH=$PWD:$HOME/Iliyas/questVR_ws/src/oculus_reader/scripts:$PYTHON
 scripts/setup_can.sh can0 1000000
 
 python3 scripts/test_piper_endpoint.py --can can0 --speed-percent 5 --dz 0.02
-python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 3
+python3 scripts/inspect_piper_sdk_feedback.py --can can0
+python3 scripts/print_piper_joints.py --can can0 --debug-feedback
+python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 3 --duration 3 --rate 50
 
 python3 scripts/check_quest_transport.py --seconds 10
 python3 scripts/debug_human_arm_model.py --side right
+python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate
 
-python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --dry-run --verbose
-python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --can can0 --speed-percent 5 --verbose
+python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --dry-run --verbose --log
+python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --can can0 --speed-percent 5 --max-joint-speed 10 --verbose --log
 ```
 
 `can0` is only an example. Use the CAN interface name your system provides.
@@ -60,7 +63,7 @@ python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode 
 ## Controls
 
 - Right controller controls the single Piper by default.
-- `A` calibrates the current controller/shoulder estimate and measured Piper joint pose.
+- `A` calibrates the current human-arm vector to the measured Piper joint pose.
 - After calibration, release and press `rightGrip` before motion starts.
 - Each new deadman press creates a clutch anchor.
 - Releasing the deadman holds the measured current joint pose in `joint_mimic`.
@@ -76,13 +79,16 @@ python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode 
 - Joint targets are clamped to documented Piper joint limits.
 - Joint speeds are rate-limited per joint.
 - Ctrl+C commands a clean hold.
-- If joint feedback is unavailable, the driver warns and falls back to the last joint command only for hold.
+- Real joint mimic refuses calibration when joint feedback is unavailable.
+- If feedback later drops out, hold can fall back only to a real joint command already sent during this process.
 
 ## Useful Commands
 
 ```bash
 python3 scripts/print_piper_joints.py --can can0
 python3 scripts/debug_human_arm_model.py --side right --dry-run
+python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate --dry-run
+python3 scripts/tune_joint_mapping_vr.py --can can0 --joint 1 --max-speed 5
 python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --control-mode endpoint_firmware --dry-run --verbose
 python3 -m piper_vr.dual_movep_teleop --config configs/dual_piper.yaml --dry-run
 ```

@@ -33,8 +33,11 @@ class PiperDriver:
         self.last_pose = EndPose(np.array([0.35, 0.0, 0.25], dtype=float), np.zeros(3, dtype=float))
         self.last_command = EndPose(self.last_pose.xyz_m.copy(), self.last_pose.rpy_deg.copy())
         self.last_joint_command = JointPose(np.array([0.0, 90.0, -90.0, 0.0, 0.0, 0.0], dtype=float))
+        self.has_sent_joint_command = False
+        self.has_measured_joint_feedback = False
+        self._joint_feedback_warnings: set[str] = set()
 
-    def connect(self) -> None:
+    def connect(self, initial_mode: str | None = None) -> None:
         if self.dry_run:
             print("[DRY-RUN] Piper connection skipped.")
             return
@@ -52,7 +55,12 @@ class PiperDriver:
         time.sleep(1.0)
 
         self.enable()
-        self.set_move_p_mode()
+        if initial_mode == "endpoint":
+            self.set_move_p_mode()
+        elif initial_mode == "joint":
+            self.set_move_j_mode()
+        elif initial_mode is not None:
+            raise ValueError("initial_mode must be 'endpoint', 'joint', or None")
 
         pose = self.read_end_pose()
         if pose is not None:
@@ -167,32 +175,46 @@ class PiperDriver:
             return [float(v) for v in obj[:6]]
         return None
 
-    def read_joint_pose(self) -> JointPose | None:
+    def read_joint_pose(self, *, debug_feedback: bool = False) -> JointPose | None:
         if self.dry_run:
             return self.last_joint_command
         if self.arm is None:
             return None
 
-        feedback_getters = ("GetArmJointMsgs", "GetArmJointCtrl", "GetArmStatus", "get_joint_pose", "get_joint_state")
-        feedback = None
-        getter_name = None
+        feedback_getters = ("GetArmJointMsgs", "GetArmJointCtrl", "GetArmLowSpdInfoMsgs", "get_joint_pose", "get_joint_state")
+        found_getter = False
         for getter in feedback_getters:
             method = getattr(self.arm, getter, None)
-            if method is not None:
+            if method is None:
+                continue
+            found_getter = True
+            try:
                 feedback = method()
-                getter_name = getter
-                break
-        if feedback is None:
-            print("[Piper] No joint feedback getter found; falling back to last joint command.")
-            return None
+            except Exception as exc:
+                self._warn_joint_feedback_once(getter, f"[Piper] Joint feedback getter {getter} failed: {exc!r}")
+                continue
+            if feedback is None:
+                self._warn_joint_feedback_once(getter, f"[Piper] Joint feedback getter {getter} returned None.")
+                continue
+            if debug_feedback:
+                print(f"[Piper] {getter} -> {feedback!r}")
+                print(f"[Piper] dir({getter}) = {dir(feedback)}")
+            values = self._extract_joint_values(feedback)
+            if values is None:
+                self._warn_joint_feedback_once(getter, f"[Piper] Could not parse joint feedback from {getter}: {feedback!r}")
+                continue
+            pose = JointPose(clamp_joints_deg([piper_joint_units_to_degrees(v) for v in values[:6]]))
+            self.has_measured_joint_feedback = True
+            self.last_joint_command = pose
+            return pose
+        if not found_getter:
+            self._warn_joint_feedback_once("missing_getter", "[Piper] No joint feedback getter found.")
+        return None
 
-        values = self._extract_joint_values(feedback)
-        if values is None:
-            print(f"[Piper] Could not parse joint feedback from {getter_name}: {feedback!r}")
-            return None
-        pose = JointPose(clamp_joints_deg([piper_joint_units_to_degrees(v) for v in values[:6]]))
-        self.last_joint_command = pose
-        return pose
+    def _warn_joint_feedback_once(self, key: str, message: str) -> None:
+        if key not in self._joint_feedback_warnings:
+            self._joint_feedback_warnings.add(key)
+            print(message)
 
     def _extract_joint_values(self, feedback: Any) -> list[float] | None:
         candidates = [feedback]
@@ -258,6 +280,7 @@ class PiperDriver:
         joints_deg = clamp_joints_deg(joints_deg)
         command = [degrees_to_piper_joint_units(float(value)) for value in joints_deg]
         self.last_joint_command = JointPose(joints_deg.copy())
+        self.has_sent_joint_command = True
         if self.dry_run:
             print(f"[DRY-RUN] JointCtrl joints_deg={joints_deg.round(2).tolist()} raw={command}")
             return
@@ -282,10 +305,17 @@ class PiperDriver:
             pose = self.last_pose
         self.send_end_pose(pose.xyz_m, pose.rpy_deg)
 
-    def hold_joints(self) -> None:
-        """Hold measured joint pose, falling back to the most recent joint command."""
+    def hold_joints(self, *, allow_last_command_fallback: bool = False) -> None:
+        """Hold measured joint pose.
+
+        In real mode, fallback to the last command is allowed only when a real
+        JointCtrl command was already sent in this process and the caller
+        explicitly opts in.
+        """
         pose = self.read_joint_pose()
         if pose is None:
-            print("[Piper] WARNING: joint feedback unavailable; holding last joint command.")
+            if not allow_last_command_fallback or not self.has_sent_joint_command:
+                raise RuntimeError("Cannot hold joints safely: no measured joint feedback and no allowed previous joint command fallback.")
+            print("[Piper] WARNING: joint feedback unavailable; holding last sent joint command.")
             pose = self.last_joint_command
         self.send_joint_pose(pose.joints_deg)
