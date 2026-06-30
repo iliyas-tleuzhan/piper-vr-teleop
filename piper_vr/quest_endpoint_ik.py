@@ -161,6 +161,7 @@ class EndpointIKResult:
     scale: float | None = None
     scale_xyz: np.ndarray | None = None
     axis_mapping: dict[str, str] | None = None
+    fk_backend: str | None = None
     target_rpy_deg: np.ndarray | None = None
     raw_joint_target_deg: np.ndarray | None = None
     safe_joint_target_deg: np.ndarray | None = None
@@ -386,6 +387,7 @@ class QuestEndpointIKSession:
             "robot_y": self.config.axis_mapping.robot_y,
             "robot_z": self.config.axis_mapping.robot_z,
         }
+        result.fk_backend = None if self.kinematics is None else getattr(self.kinematics, "backend_name", type(self.kinematics).__name__)
         result.controller_delta_rpy_deg = debug["controller_delta_rpy_deg"]
         result.mapped_robot_delta_rpy_deg = debug["mapped_robot_delta_rpy_deg"]
         result.target_xyz = self.filtered_xyz.copy()

@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from piper_vr.config import deep_merge
-from piper_vr.piper_official_kinematics import PiperOfficialDHForwardKinematics
+from piper_vr.piper_official_kinematics import PiperApproxForwardKinematics, parse_rpy_to_degrees, parse_xyz_to_meters
 from piper_vr.piper_driver import EndPose, JointPose
 from piper_vr.quest_endpoint_ik import (
     EndpointAxisMapping,
@@ -145,11 +145,18 @@ def test_backend_selection_and_position_only_default():
 
 
 def test_official_dh_fk_sanity_units_are_meters():
-    fk = PiperOfficialDHForwardKinematics()
+    fk = PiperApproxForwardKinematics()
     xyz, rotation = fk.forward(np.radians([0.0, 90.0, -90.0, 0.0, 0.0, 0.0]))
     assert xyz.shape == (3,)
     assert rotation.shape == (3, 3)
     assert 0.05 < np.linalg.norm(xyz) < 1.0
+
+
+def test_sdk_fk_unit_parsers():
+    np.testing.assert_allclose(parse_xyz_to_meters([499567, 0, 409863]), [0.499567, 0.0, 0.409863])
+    np.testing.assert_allclose(parse_xyz_to_meters([499.567, 0, 409.863]), [0.499567, 0.0, 0.409863])
+    np.testing.assert_allclose(parse_xyz_to_meters([0.499567, 0, 0.409863]), [0.499567, 0.0, 0.409863])
+    np.testing.assert_allclose(parse_rpy_to_degrees([1000, -2000, 3000]), [1.0, -2.0, 3.0])
 
 
 def test_home_relative_clamp():
@@ -273,15 +280,15 @@ def test_generated_endpoint_mapping_config_deep_merges():
     assert merged["quest_endpoint_ik"]["rotation_mapping"]["robot_yaw"] == "-quest_yaw"
 
 
-def test_official_sdk_fk_compare_if_available():
+def test_sdk_fk_available_and_returns_reasonable_pose_if_available():
     try:
         from piper_vr.piper_official_kinematics import PiperSDKForwardKinematics
 
         sdk_fk = PiperSDKForwardKinematics()
     except RuntimeError:
         pytest.skip("piper_sdk official FK is not installed")
-    local_fk = PiperOfficialDHForwardKinematics()
     joints = np.radians([0.0, 90.0, -90.0, 0.0, 0.0, 0.0])
     sdk_xyz, _ = sdk_fk.forward(joints)
-    local_xyz, _ = local_fk.forward(joints)
-    assert np.linalg.norm(sdk_xyz - local_xyz) < 0.20
+    assert sdk_xyz.shape == (3,)
+    assert np.all(np.isfinite(sdk_xyz))
+    assert 0.05 < np.linalg.norm(sdk_xyz) < 1.0

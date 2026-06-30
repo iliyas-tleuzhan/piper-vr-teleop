@@ -195,6 +195,7 @@ def _print_ik_debug(result, driver: PiperDriver) -> None:
     print(
         "[debug-ik] "
         f"control_frame={getattr(result, 'control_frame', None)} "
+        f"fk_backend={getattr(result, 'fk_backend', None)} "
         f"state={result.state.value} "
         f"calibrated={result.calibrated} "
         f"controller_xyz={_format_array(result.controller_xyz, 4)} "

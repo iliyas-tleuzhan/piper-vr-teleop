@@ -131,6 +131,13 @@ python3 scripts/verify_endpoint_directions.py --config configs/generated_endpoin
 python3 scripts/test_firmware_endpoint_from_quest.py --config configs/generated_endpoint_ik_mapping.yaml
 ```
 
+FK backend notes:
+
+- `firmware_endpoint` is recommended for first real robot testing because Piper firmware handles endpoint IK.
+- `host_ik_sdk_fk` uses official Piper SDK FK when available.
+- If official SDK FK is unavailable, the local fallback is approximate and mainly for dry-run/testing.
+- `host_ik_urdf` requires the AgileX URDF submodule.
+
 - If forward/back is inverted, rerun calibration and check the generated `quest_endpoint_ik.axis_mapping.robot_x` sign.
 - If left/right is slow, increase `quest_endpoint_ik.scale_xyz[1]`.
 - If forward/back barely moves, check `quest_endpoint_ik.scale_xyz[0]`, `max_delta_from_home_m`, and the `--debug-ik` clamped axes.
