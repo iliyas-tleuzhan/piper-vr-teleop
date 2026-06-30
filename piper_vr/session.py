@@ -46,8 +46,11 @@ class SessionResult:
     sample_age_s: float | None = None
     delta_xyz: np.ndarray | None = None
     delta_rot_deg: np.ndarray | None = None
+    delta_rot_raw_deg: np.ndarray | None = None
     relative_u: np.ndarray | None = None
     relative_dq_deg: np.ndarray | None = None
+    translation_dq_deg: np.ndarray | None = None
+    wrist_dq_deg: np.ndarray | None = None
 
 
 class TeleopSession:
@@ -298,6 +301,7 @@ class JointMimicSession:
         self.ik_desired_xyz_m: np.ndarray | None = None
         self.ik_desired_rpy_deg: np.ndarray | None = None
         self.ik_seed_rad: np.ndarray | None = None
+        self.filtered_delta_rot_deg = np.zeros(3)
         self.was_deadman_pressed = False
         self.was_calibrate_pressed = False
         self.require_deadman_repress = False
@@ -387,6 +391,7 @@ class JointMimicSession:
                 self.controller_home,
             )
             self.previous_elbow = human_home.elbow_xyz_m.copy()
+            self.filtered_delta_rot_deg = np.zeros(3)
             self.stop_counter = 0
             self.tracking_error_frames = 0
             self.require_deadman_repress = True
@@ -519,6 +524,7 @@ class JointMimicSession:
         self.ik_desired_xyz_m = None
         self.ik_desired_rpy_deg = None
         self.ik_seed_rad = np.radians(self.robot_home_joints_deg)
+        self.filtered_delta_rot_deg = np.zeros(3)
         self.last_idle_hold_s = None
         return measured, human_current, "ok"
 
@@ -579,19 +585,33 @@ class JointMimicSession:
             ControlFrameConfig(source=self.mimic_config.control_frame),
             self.controller_home,
         )
-        delta_xyz, delta_rot_deg = controller_delta_in_control_frame(self.previous_controller_transform, current_vr, control_frame)
+        delta_xyz, delta_rot_raw_deg = controller_delta_in_control_frame(self.previous_controller_transform, current_vr, control_frame)
+        delta_rot_deg = delta_rot_raw_deg.copy()
         if float(np.linalg.norm(delta_xyz)) < self.mimic_config.translation_deadband_m:
             delta_xyz = np.zeros(3)
-        if float(np.linalg.norm(delta_rot_deg)) < self.mimic_config.rotation_deadband_deg:
+        rotation_deadband = (
+            self.mimic_config.rotation_deadband_deg
+            if self.mimic_config.wrist_rotation_deadband_deg is None
+            else self.mimic_config.wrist_rotation_deadband_deg
+        )
+        if float(np.linalg.norm(delta_rot_deg)) < rotation_deadband:
             delta_rot_deg = np.zeros(3)
         rotation_allowed = self.mimic_config.wrist_rotation_enabled
-        if self.mimic_config.wrist_rotation_deadman and not is_pressed(buttons, self.mimic_config.wrist_rotation_deadman):
-            rotation_allowed = False
+        if self.mimic_config.wrist_rotation_deadman:
+            rotation_allowed = rotation_allowed and is_pressed(buttons, self.mimic_config.wrist_rotation_deadman)
         if not rotation_allowed:
             delta_rot_deg = np.zeros(3)
+            self.filtered_delta_rot_deg = np.zeros(3)
+        elif np.allclose(delta_rot_deg, 0.0):
+            self.filtered_delta_rot_deg = np.zeros(3)
+        else:
+            alpha = self.mimic_config.wrist_rotation_filter_alpha
+            self.filtered_delta_rot_deg = self.filtered_delta_rot_deg + alpha * (delta_rot_deg - self.filtered_delta_rot_deg)
+            delta_rot_deg = self.filtered_delta_rot_deg.copy()
 
         u = np.concatenate((delta_xyz, delta_rot_deg))
         result.delta_xyz = delta_xyz.copy()
+        result.delta_rot_raw_deg = delta_rot_raw_deg.copy()
         result.delta_rot_deg = delta_rot_deg.copy()
         result.relative_u = u.copy()
         self.previous_controller_transform = np.asarray(current_vr, dtype=float).copy()
@@ -619,6 +639,8 @@ class JointMimicSession:
         self.stop_counter = 0
         dq = self.mimic_config.relative_gain_matrix @ u
         result.relative_dq_deg = dq.copy()
+        result.translation_dq_deg = dq[:3].copy()
+        result.wrist_dq_deg = dq[3:6].copy()
         raw_target = clamp_joints_deg(self.last_command_deg + dq)
         return self._send_joint_target(raw_target, None, None, driver, result, dt)
 

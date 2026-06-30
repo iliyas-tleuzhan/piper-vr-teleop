@@ -21,7 +21,7 @@ This is approximate because Quest does not directly track the shoulder or elbow,
 - Raw controller Euler angles caused wrist twisting.
 - Absolute pose-delta mapping made directions confusing when the operator/control frame was not calibrated.
 - Rate limiting could leave Piper chasing an old target after the controller stopped.
-- The default now uses previous-frame controller deltas in an HMD-yaw control frame, deadband, stop/backlog cancellation, and disabled wrist rotation.
+- The default now uses previous-frame controller deltas in an HMD-yaw control frame, deadband, filtering, stop/backlog cancellation, and wrist rotation under the main grip deadman.
 
 ## Relative Delta Mapping
 
@@ -33,7 +33,7 @@ dq = relative_gain_matrix @ u
 target = last_command + dq
 ```
 
-Translation and rotation deadbands remove jitter. If the controller stops for `settle_frames_on_stop`, the session stops advancing targets and can sync back to measured joints. Wrist rotation columns are zero in the default config, and `wrist_rotation_enabled` is false until tuning proves the axes are correct.
+Translation and rotation deadbands remove jitter. If the controller stops for `settle_frames_on_stop`, the session stops advancing targets and can sync back to measured joints. Controller translation drives joints 1-3, controller rotation drives joints 4-6, and `rightTrig` is not required by default. Wrist safety comes from main-grip clutching, small gains, deadband, filtering, joint limits, and wrist speed limits.
 
 ## Pose-Delta Mapping
 
@@ -84,7 +84,14 @@ python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 5 --duratio
 python3 -m piper_vr.vr_teleop --config configs/generated_relative_mapping.yaml --debug-motion
 ```
 
-The checked-in gain matrix is a strong temporary guess. Prefer the generated mapping because it measures which Quest delta channel changes for physical up/down/left/right/forward/back. `--debug-motion` prints raw controller XYZ, control-frame deltas, dominant channel, `u`, `dq`, raw/safe targets, measured joints, and tracking error.
+The checked-in gain matrix is a strong temporary guess. Prefer the generated mapping because it measures which Quest delta channel changes for physical up/down/left/right/forward/back and roll/pitch/yaw. `--debug-motion` prints raw controller XYZ, translation deltas, raw/used rotation deltas, translation/wrist/full `dq`, safe targets, measured joints, and tracking error.
+
+For wrist-only validation without a robot:
+
+```bash
+python3 scripts/test_controller_rotation_to_wrist.py
+python3 scripts/test_controller_rotation_to_wrist.py --robot --can can0
+```
 
 Speed profiles are available when a slower first run is needed:
 

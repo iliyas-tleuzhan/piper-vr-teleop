@@ -42,7 +42,7 @@ Joint mimic is calibration-relative. `A` calibrates, and every fresh `rightGrip`
 - Raw controller Euler angles caused wrist twisting.
 - Absolute pose-delta mapping caused direction changes when the control frame was not calibrated.
 - Rate limiting could make Piper continue moving after the controller stopped.
-- The default now uses relative controller deltas, deadband, backlog cancellation, and disabled wrist rotation.
+- The default now uses relative controller deltas, deadband, backlog cancellation, and grip-held wrist rotation with filtering and small gains.
 
 ## Joint feedback is unavailable
 

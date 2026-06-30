@@ -47,6 +47,7 @@ def main() -> int:
     control_frame = None
     previous_transform = None
     previous_pressed = False
+    filtered_delta_rot = np.zeros(3)
     try:
         while True:
             sample = quest.get_sample()
@@ -69,17 +70,25 @@ def main() -> int:
             previous_transform = np.asarray(transform, dtype=float).copy()
             if float(np.linalg.norm(delta_xyz)) < mimic.translation_deadband_m:
                 delta_xyz = np.zeros(3)
-            if float(np.linalg.norm(delta_rot)) < mimic.rotation_deadband_deg:
+            rotation_deadband = mimic.rotation_deadband_deg if mimic.wrist_rotation_deadband_deg is None else mimic.wrist_rotation_deadband_deg
+            if float(np.linalg.norm(delta_rot)) < rotation_deadband:
                 delta_rot = np.zeros(3)
             if not mimic.wrist_rotation_enabled:
                 delta_rot = np.zeros(3)
+                filtered_delta_rot = np.zeros(3)
+            elif np.allclose(delta_rot, 0.0):
+                filtered_delta_rot = np.zeros(3)
+            else:
+                filtered_delta_rot = filtered_delta_rot + mimic.wrist_rotation_filter_alpha * (delta_rot - filtered_delta_rot)
+                delta_rot = filtered_delta_rot.copy()
             u = np.concatenate((delta_xyz, delta_rot))
             dq = mimic.relative_gain_matrix @ u
             _, channel, sign, value = dominant_channel(delta_xyz)
             print(
                 f"raw_xyz={_fmt(np.asarray(transform)[:3, 3])} "
-                f"delta_xyz={_fmt(delta_xyz, 4)} dominant={channel} {sign} {value:.4f} "
-                f"u={_fmt(u, 4)} predicted_joint_delta_deg={_fmt(dq, 2)}"
+                f"delta_xyz={_fmt(delta_xyz, 4)} delta_rot_deg={_fmt(delta_rot, 3)} "
+                f"dominant={channel} {sign} {value:.4f} "
+                f"translation_dq={_fmt(dq[:3], 2)} wrist_dq={_fmt(dq[3:6], 2)} full_dq={_fmt(dq, 2)}"
             )
             time.sleep(0.1)
     except KeyboardInterrupt:

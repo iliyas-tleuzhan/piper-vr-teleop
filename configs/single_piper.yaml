@@ -67,11 +67,15 @@ joint_mimic:
     - [-300.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     - [0.0, 250.0, 250.0, 0.0, 0.0, 0.0]
     - [0.0, -250.0, 250.0, 0.0, 0.0, 0.0]
-    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-  wrist_rotation_enabled: false
-  wrist_rotation_deadman: "rightTrig"
+    - [0.0, 0.0, 0.0, 0.6, 0.0, 0.0]
+    - [0.0, 0.0, 0.0, 0.0, 0.6, 0.0]
+    - [0.0, 0.0, 0.0, 0.0, 0.0, 0.6]
+  wrist_rotation_enabled: true
+  wrist_rotation_deadman: null
+  wrist_rotation_gain: 0.6
+  wrist_rotation_deadband_deg: 1.5
+  max_wrist_speed_deg_s: [45, 45, 45]
+  wrist_rotation_filter_alpha: 0.5
   max_tracking_error_deg: 12.0
   tracking_error_fault_frames: 10
 

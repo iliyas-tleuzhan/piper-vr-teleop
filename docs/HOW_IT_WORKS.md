@@ -21,7 +21,7 @@ The older `pose_delta` path remains available. A Quest controller alone does not
 - Elbow position is solved from shoulder-to-wrist geometry, arm lengths, previous elbow state, and elbow swivel.
 - Wrist orientation comes from controller orientation.
 
-For `relative_delta`, the controller delta is converted into `[dx, dy, dz, droll, dpitch, dyaw]`; deadbands are applied; wrist rotation is zeroed by default; then `relative_gain_matrix @ u` creates a small joint increment.
+For `relative_delta`, the controller delta is converted into `[dx, dy, dz, droll, dpitch, dyaw]`; deadbands and wrist filtering are applied; then `relative_gain_matrix @ u` creates a small joint increment. Translation normally drives joints 1-3 and controller rotation drives wrist joints 4-6 while the main `rightGrip` deadman is held.
 
 For `pose_delta`, the resulting `HumanArmState` is converted to six human posture channels: shoulder yaw, shoulder pitch, elbow flexion, shoulder/forearm roll, wrist pitch, and wrist yaw. At calibration, those channels are stored as `human_home_vector_deg` and measured Piper feedback is stored as `robot_home_joints_deg`.
 
@@ -38,7 +38,7 @@ Targets are clamped to Piper joint limits, smoothed, rate-limited, and sent thro
 - Raw controller Euler angles caused wrist twisting.
 - Absolute pose-delta mapping caused confusing direction changes when frames were not calibrated.
 - Rate limiting caused Piper to keep moving after the controller stopped.
-- The new default uses relative controller deltas, deadband, no backlog, and disabled wrist rotation by default.
+- The new default uses relative controller deltas, deadband, no backlog, and wrist rotation as normal grip-held teleop with small gains and speed limits.
 
 ## Endpoint Firmware Path
 

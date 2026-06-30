@@ -16,14 +16,14 @@ Use `joint_mimic` when the goal is whole-arm teleoperation. It is still approxim
 
 Joint mimic is calibration-relative. Pressing `A` only calibrates; every new `rightGrip` press creates a new clutch anchor. If you move the controller while the deadman is released, the robot should not jump when you grip again.
 
-The default `joint_mimic` mapping is now `relative_delta`: each frame uses small controller motion in a calibrated HMD-yaw/control frame to increment the robot joint target. Wrist rotation is disabled by default until explicitly tuned.
+The default `joint_mimic` mapping is now six-joint `relative_delta`: each frame uses small controller motion in a calibrated HMD-yaw/control frame to increment the robot joint target. Controller translation drives joints 1-3, and controller rotation drives wrist joints 4-6 while `rightGrip` is held. `rightTrig` is not required for wrist motion by default.
 
 ## Why the old movement felt wrong
 
 - Raw controller Euler angles caused unexpected wrist twisting.
 - Absolute pose-delta mapping made horizontal/forward directions depend too much on poorly calibrated frames.
 - Rate limiting could leave a target backlog, so Piper kept moving after the controller stopped.
-- The default path now uses relative controller deltas, deadband, backlog cancellation on stop, and disabled wrist rotation.
+- The default path now uses relative controller deltas, deadband, filtering, small wrist gains, backlog cancellation on stop, and main-grip clutching.
 
 ## Hardware
 
@@ -74,10 +74,11 @@ python3 -m piper_vr.vr_teleop --config configs/generated_relative_mapping.yaml -
 - Right controller controls the single Piper by default.
 - `A` calibrates the current human-arm vector to the measured Piper joint pose.
 - After calibration, release and press `rightGrip` before motion starts.
+- Hold `rightGrip` to control all six joints: translation controls joints 1-3, rotation controls joints 4-6.
 - Each new deadman press creates a clutch anchor.
 - Releasing the deadman holds the measured current joint pose in `joint_mimic`.
 - Right joystick X adjusts elbow swivel when configured as `rightJS_x`.
-- Right trigger controls the gripper only when `gripper_enabled: true`.
+- Right trigger is not required for wrist rotation. It controls the gripper only when `gripper_enabled: true`.
 
 ## Safety Defaults
 
@@ -102,6 +103,7 @@ scripts/run_dry.sh
 python3 scripts/record_quest_axis_movements.py --side right
 python3 scripts/generate_relative_gain_config.py
 python3 scripts/predict_piper_motion_from_controller.py --config configs/generated_relative_mapping.yaml
+python3 scripts/test_controller_rotation_to_wrist.py
 python3 -m piper_vr.vr_teleop --profile safe
 python3 -m piper_vr.vr_teleop --profile normal
 python3 -m piper_vr.vr_teleop --profile fast

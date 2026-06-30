@@ -224,8 +224,8 @@ def test_relative_twist_disabled_ignores_rotation_only_motion():
     assert not driver.sent
 
 
-def test_relative_wrist_rotation_requires_trigger():
-    session = make_relative_session({"wrist_rotation_enabled": True, "rotation_deadband_deg": 0.0})
+def test_relative_wrist_rotation_can_optionally_require_trigger():
+    session = make_relative_session({"wrist_rotation_enabled": True, "wrist_rotation_deadman": "rightTrig", "rotation_deadband_deg": 0.0})
     driver = FakeJointDriver()
     session.step(sample({"A": True}, transform=rotate_z(0)), driver)
     session.step(sample({"rightGrip": (0.0,)}, transform=rotate_z(0)), driver)
@@ -235,3 +235,59 @@ def test_relative_wrist_rotation_requires_trigger():
     with_trigger = session.step(sample({"rightGrip": (1.0,), "rightTrig": (1.0,)}, transform=rotate_z(30)), driver)
     assert with_trigger.action == "sent"
     assert abs(with_trigger.safe_joint_target_deg[5] - with_trigger.robot_home_joints_deg[5]) > 1e-6
+
+
+def test_relative_wrist_rotation_default_needs_no_trigger():
+    session = make_relative_session(
+        {
+            "wrist_rotation_enabled": True,
+            "wrist_rotation_deadman": None,
+            "rotation_deadband_deg": 0.0,
+            "wrist_rotation_filter_alpha": 1.0,
+            "relative_gain_matrix": [[0, 0, 0, 0, 0, 0]] * 5 + [[0, 0, 0, 0, 0, 0.6]],
+        }
+    )
+    driver = FakeJointDriver()
+    session.step(sample({"A": True}, transform=rotate_z(0)), driver)
+    session.step(sample({"rightGrip": (0.0,)}, transform=rotate_z(0)), driver)
+    session.step(sample({"rightGrip": (1.0,)}, transform=rotate_z(0)), driver)
+    result = session.step(sample({"rightGrip": (1.0,)}, transform=rotate_z(10)), driver)
+    assert result.action == "sent"
+    assert result.wrist_dq_deg[2] > 0.0
+    assert abs(result.safe_joint_target_deg[5] - result.robot_home_joints_deg[5]) > 1e-6
+
+
+def test_first_right_grip_clutch_frame_does_not_send_wrist_jump():
+    session = make_relative_session({"wrist_rotation_enabled": True, "wrist_rotation_deadman": None, "rotation_deadband_deg": 0.0})
+    driver = FakeJointDriver()
+    session.step(sample({"A": True}, transform=rotate_z(0)), driver)
+    session.step(sample({"rightGrip": (0.0,)}, transform=rotate_z(45)), driver)
+    armed = session.step(sample({"rightGrip": (1.0,)}, transform=rotate_z(45)), driver)
+    assert armed.reason == "armed_this_cycle"
+    assert not driver.sent
+    stopped = session.step(sample({"rightGrip": (1.0,)}, transform=rotate_z(45)), driver)
+    assert stopped.action == "skipped"
+
+
+def test_stopping_controller_rotation_stops_wrist_target_updates():
+    session = make_relative_session(
+        {
+            "wrist_rotation_enabled": True,
+            "wrist_rotation_deadman": None,
+            "rotation_deadband_deg": 0.0,
+            "wrist_rotation_filter_alpha": 1.0,
+            "settle_frames_on_stop": 2,
+            "relative_gain_matrix": [[0, 0, 0, 0, 0, 0]] * 5 + [[0, 0, 0, 0, 0, 0.6]],
+        }
+    )
+    driver = FakeJointDriver()
+    session.step(sample({"A": True}, transform=rotate_z(0)), driver)
+    session.step(sample({"rightGrip": (0.0,)}, transform=rotate_z(0)), driver)
+    session.step(sample({"rightGrip": (1.0,)}, transform=rotate_z(0)), driver)
+    moved = session.step(sample({"rightGrip": (1.0,)}, transform=rotate_z(10)), driver)
+    stopped_1 = session.step(sample({"rightGrip": (1.0,)}, transform=rotate_z(10)), driver)
+    stopped_2 = session.step(sample({"rightGrip": (1.0,)}, transform=rotate_z(10)), driver)
+    assert moved.action == "sent"
+    assert stopped_1.action == "skipped"
+    assert stopped_2.action == "skipped"
+    np.testing.assert_allclose(stopped_2.safe_joint_target_deg, moved.safe_joint_target_deg)

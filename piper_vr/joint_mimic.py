@@ -27,19 +27,32 @@ class JointMimicConfig:
     cancel_backlog_on_stop: bool = True
     relative_gain_matrix: np.ndarray | None = None
     wrist_rotation_enabled: bool = False
-    wrist_rotation_deadman: str = "rightTrig"
+    wrist_rotation_deadman: str | None = None
+    wrist_rotation_gain: float = 0.6
+    wrist_rotation_deadband_deg: float | None = None
+    max_wrist_speed_deg_s: np.ndarray | None = None
+    wrist_rotation_filter_alpha: float = 0.5
     max_tracking_error_deg: float = 12.0
     tracking_error_fault_frames: int = 10
 
     @classmethod
     def from_config(cls, config: dict | None) -> "JointMimicConfig":
         config = config or {}
+        deadman = config.get("wrist_rotation_deadman", None)
+        if deadman in ("", "none", "None", "null", "Null"):
+            deadman = None
+        max_speed = np.asarray(config.get("max_joint_speed_deg_s", [25, 25, 25, 45, 45, 60]), dtype=float)
+        max_wrist_speed = config.get("max_wrist_speed_deg_s", None)
+        if max_wrist_speed is not None:
+            max_wrist_speed = np.asarray(max_wrist_speed, dtype=float)
+            max_speed = max_speed.copy()
+            max_speed[3:6] = max_wrist_speed
         return cls(
             neutral_deg=np.asarray(config.get("neutral_deg", [0.0, 90.0, -90.0, 0.0, 0.0, 0.0]), dtype=float),
             offsets_deg=np.asarray(config.get("offsets_deg", [0.0] * 6), dtype=float),
             signs=np.asarray(config.get("signs", [1.0] * 6), dtype=float),
             gains=np.asarray(config.get("gains", [1.0] * 6), dtype=float),
-            max_joint_speed_deg_s=np.asarray(config.get("max_joint_speed_deg_s", [25, 25, 25, 45, 45, 60]), dtype=float),
+            max_joint_speed_deg_s=max_speed,
             smoothing_alpha=float(config.get("smoothing_alpha", 0.25)),
             idle_hold_hz=float(config.get("idle_hold_hz", 0.0)),
             mapping_mode=str(config.get("mapping_mode", "pose_delta")),
@@ -54,13 +67,19 @@ class JointMimicConfig:
                     [30.0, 0.0, 0.0, 0.0, 0.0, 0.0],
                     [0.0, 0.0, 30.0, 0.0, 0.0, 0.0],
                     [0.0, 0.0, -30.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.6, 0.0, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.6, 0.0],
+                    [0.0, 0.0, 0.0, 0.0, 0.0, 0.6],
                 ],
             ), dtype=float),
-            wrist_rotation_enabled=bool(config.get("wrist_rotation_enabled", False)),
-            wrist_rotation_deadman=str(config.get("wrist_rotation_deadman", "rightTrig")),
+            wrist_rotation_enabled=bool(config.get("wrist_rotation_enabled", True)),
+            wrist_rotation_deadman=deadman,
+            wrist_rotation_gain=float(config.get("wrist_rotation_gain", 0.6)),
+            wrist_rotation_deadband_deg=None
+            if config.get("wrist_rotation_deadband_deg", None) is None
+            else float(config.get("wrist_rotation_deadband_deg")),
+            max_wrist_speed_deg_s=max_wrist_speed,
+            wrist_rotation_filter_alpha=float(config.get("wrist_rotation_filter_alpha", 0.5)),
             max_tracking_error_deg=float(config.get("max_tracking_error_deg", 12.0)),
             tracking_error_fault_frames=int(config.get("tracking_error_fault_frames", 10)),
         )
@@ -85,6 +104,16 @@ class JointMimicConfig:
             raise ValueError("tracking_error_fault_frames must be >= 1")
         if self.max_tracking_error_deg < 0.0:
             raise ValueError("max_tracking_error_deg must be non-negative")
+        if self.wrist_rotation_deadman is not None:
+            self.wrist_rotation_deadman = str(self.wrist_rotation_deadman)
+        if self.wrist_rotation_deadband_deg is not None and self.wrist_rotation_deadband_deg < 0.0:
+            raise ValueError("wrist_rotation_deadband_deg must be non-negative")
+        if not 0.0 < self.wrist_rotation_filter_alpha <= 1.0:
+            raise ValueError("wrist_rotation_filter_alpha must be in the range (0, 1]")
+        if self.max_wrist_speed_deg_s is not None:
+            self.max_wrist_speed_deg_s = np.asarray(self.max_wrist_speed_deg_s, dtype=float)
+            if self.max_wrist_speed_deg_s.shape != (3,):
+                raise ValueError("max_wrist_speed_deg_s must contain three values")
         self.relative_gain_matrix = np.asarray(self.relative_gain_matrix, dtype=float)
         if self.relative_gain_matrix.shape != (6, 6):
             raise ValueError("relative_gain_matrix must have shape (6, 6)")

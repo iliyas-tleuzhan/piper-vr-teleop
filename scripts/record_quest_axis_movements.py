@@ -16,7 +16,7 @@ from piper_vr.config import load_config
 from piper_vr.frame_calibration import ControlFrameConfig, controller_delta_in_control_frame, get_control_frame
 from piper_vr.joint_mimic import JointMimicConfig
 from piper_vr.quest_reader import QuestReader
-from piper_vr.relative_calibration import MOVEMENTS, build_observation
+from piper_vr.relative_calibration import MOVEMENTS, ROTATION_MOVEMENTS, build_observation
 
 
 def _fmt(values: np.ndarray) -> str:
@@ -74,23 +74,25 @@ def main() -> int:
 
     rows = []
     try:
-        for movement in MOVEMENTS:
+        for movement in (*MOVEMENTS, *ROTATION_MOVEMENTS):
             _, final = _wait_for_button_sample(
                 quest,
                 side,
                 button,
-                f"\nMove controller {movement.upper()}, hold it there, then press {button}.",
+                f"\nMove/rotate controller {movement.upper().replace('_', ' ')}, hold it there, then press {button}.",
             )
             delta_xyz, delta_rot_deg = controller_delta_in_control_frame(home, final, control_frame)
-            row = build_observation(movement, delta_xyz)
+            row = build_observation(movement, delta_xyz, delta_rot_deg)
             row["raw_controller_xyz"] = final[:3, 3].round(6).tolist()
-            row["delta_rot_deg"] = delta_rot_deg.round(6).tolist()
             rows.append(row)
-            print(f"{movement.upper()} movement:")
+            print(f"{movement.upper().replace('_', ' ')} movement:")
             print(f"  raw controller xyz = {_fmt(final[:3, 3])}")
             print(f"  delta_xyz = {_fmt(delta_xyz)}")
+            print(f"  delta_rot_deg = {_fmt(delta_rot_deg)}")
             print(f"  dominant channel = {row['dominant_channel']}")
             print(f"  sign = {row['sign']}")
+            print(f"  dominant rotation channel = {row['dominant_rotation_channel']}")
+            print(f"  rotation sign = {row['rotation_sign']}")
     finally:
         quest.stop()
 

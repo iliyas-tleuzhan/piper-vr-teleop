@@ -50,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--viz-host", help="Quest visualization UDP host/IP")
     parser.add_argument("--viz-port", type=int, help="Quest visualization UDP port")
     parser.add_argument("--debug-motion", action="store_true", help="print relative motion internals at 10 Hz")
+    parser.add_argument("--disable-wrist", action="store_true", help="force wrist rotation channels and joints 4-6 to zero")
+    parser.add_argument("--wrist-gain", type=float, help="scale wrist rotation gain columns live")
+    parser.add_argument("--translation-only", action="store_true", help="zero rotation columns so only joints 1-3 move")
+    parser.add_argument("--rotation-only", "--wrist-only", dest="rotation_only", action="store_true", help="zero translation columns so only joints 4-6 move")
     return parser
 
 
@@ -69,6 +73,26 @@ def _apply_common_overrides(config: dict, args: argparse.Namespace) -> dict:
     if args.max_joint_speed is not None:
         mimic = config.setdefault("joint_mimic", {})
         mimic["max_joint_speed_deg_s"] = [float(args.max_joint_speed)] * 6
+    mimic = config.setdefault("joint_mimic", {})
+    if args.disable_wrist:
+        mimic["wrist_rotation_enabled"] = False
+    if args.wrist_gain is not None:
+        matrix = np.asarray(mimic.get("relative_gain_matrix", JointMimicConfig.from_config(mimic).relative_gain_matrix), dtype=float).copy()
+        mask = np.abs(matrix[:, 3:6]) > 1e-12
+        matrix[:, 3:6] = np.where(mask, np.sign(matrix[:, 3:6]) * float(args.wrist_gain), matrix[:, 3:6])
+        mimic["wrist_rotation_gain"] = float(args.wrist_gain)
+        mimic["relative_gain_matrix"] = matrix.tolist()
+    if args.translation_only or args.disable_wrist:
+        matrix = np.asarray(mimic.get("relative_gain_matrix", JointMimicConfig.from_config(mimic).relative_gain_matrix), dtype=float).copy()
+        matrix[:, 3:6] = 0.0
+        matrix[3:6, :] = 0.0
+        mimic["relative_gain_matrix"] = matrix.tolist()
+    if args.rotation_only:
+        matrix = np.asarray(mimic.get("relative_gain_matrix", JointMimicConfig.from_config(mimic).relative_gain_matrix), dtype=float).copy()
+        matrix[:, 0:3] = 0.0
+        matrix[0:3, :] = 0.0
+        mimic["relative_gain_matrix"] = matrix.tolist()
+        mimic["wrist_rotation_enabled"] = True
     viz = config.setdefault("viz", {})
     if args.viz:
         viz["enabled"] = True
@@ -125,9 +149,12 @@ def _print_motion_debug(result, driver: PiperDriver) -> None:
         "[debug-motion] "
         f"raw_controller_xyz={_format_array(result.controller_xyz, 4)} "
         f"delta_xyz={_format_array(result.delta_xyz, 4)} "
+        f"delta_rot_raw={_format_array(result.delta_rot_raw_deg, 3)} "
+        f"delta_rot_used={_format_array(result.delta_rot_deg, 3)} "
         f"dominant={dominant} "
-        f"u={_format_array(result.relative_u, 4)} "
-        f"dq={_format_array(result.relative_dq_deg, 2)} "
+        f"translation_dq={_format_array(result.translation_dq_deg, 2)} "
+        f"wrist_dq={_format_array(result.wrist_dq_deg, 2)} "
+        f"full_dq={_format_array(result.relative_dq_deg, 2)} "
         f"raw_target={_format_array(result.raw_joint_target_deg, 2)} "
         f"safe_target={_format_array(result.safe_joint_target_deg, 2)} "
         f"measured_joints={_format_array(None if measured is None else measured.joints_deg, 2)} "
@@ -173,10 +200,13 @@ class JointMimicJsonlLogger:
             "safe_joints_deg": arr(result.safe_joint_target_deg),
             "measured_joints_deg": arr(None if result.measured_joints is None else result.measured_joints.joints_deg),
             "delta_xyz": arr(result.delta_xyz),
-            "delta_rot_deg": arr(result.delta_rot_deg),
+            "delta_rot_raw_deg": arr(result.delta_rot_raw_deg),
+            "delta_rot_used_deg": arr(result.delta_rot_deg),
             "dominant_movement_channel": None if result.delta_xyz is None else dominant_channel(result.delta_xyz)[1],
             "relative_u": arr(result.relative_u),
             "relative_dq_deg": arr(result.relative_dq_deg),
+            "translation_dq_deg": arr(result.translation_dq_deg),
+            "wrist_dq_deg": arr(result.wrist_dq_deg),
             "action": result.action,
             "reason": result.reason,
         }
