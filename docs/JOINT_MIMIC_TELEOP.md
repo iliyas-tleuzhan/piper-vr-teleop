@@ -33,6 +33,8 @@ target_joints_deg = robot_home_joints_deg + offsets_deg + signs * gains * human_
 
 The target is then clamped, smoothed, rate-limited, and sent with `JointCtrl`. `neutral_deg` is only a dry-run/debug fallback; real teleop should be anchored to measured robot joints.
 
+Pressing `A` calibrates the initial relationship. Every new `rightGrip` press creates a fresh clutch anchor from the current human posture and measured robot joints. If the controller moves while the deadman is released, the next grip press should produce zero human delta and no robot jump.
+
 ## Safety Rules
 
 - No motion before calibration.
@@ -55,7 +57,7 @@ python3 scripts/inspect_piper_sdk_feedback.py --can can0
 python3 scripts/print_piper_joints.py --can can0 --debug-feedback
 python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 3 --duration 3 --rate 50
 python3 scripts/debug_human_arm_model.py --side right
-python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate
+python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A
 python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --dry-run --verbose --log
 python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --can can0 --speed-percent 5 --max-joint-speed 10 --verbose --log
 ```
@@ -65,7 +67,8 @@ Start by tuning `joint_mimic.signs`, then `gains`, then `offsets_deg`. Keep `spe
 For slow real-hardware tuning without the human-arm inference layer:
 
 ```bash
-python3 scripts/tune_joint_mapping_vr.py --can can0 --joint 1 --max-speed 5
+python3 scripts/tune_joint_mapping_vr.py --can can0 --dry-run
+python3 scripts/tune_joint_mapping_vr.py --can can0 --max-speed-deg-s 5
 ```
 
 Joint mimic logs JSONL files under `logs/joint_mimic/` when `--log` is passed.

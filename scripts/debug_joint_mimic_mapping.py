@@ -9,6 +9,7 @@ import time
 import numpy as np
 import yaml
 
+from piper_vr.buttons import is_pressed
 from piper_vr.human_arm_model import HumanArmConfig, build_human_arm_state
 from piper_vr.joint_mimic import JointMimicConfig, human_arm_to_mimic_vector_deg, mimic_vector_to_piper_joints
 from piper_vr.quest_reader import QuestReader
@@ -19,7 +20,9 @@ def main() -> int:
     parser.add_argument("--config", default="configs/single_piper.yaml")
     parser.add_argument("--side", choices=("left", "right"), default=None)
     parser.add_argument("--seconds", type=float, default=30.0)
-    parser.add_argument("--calibrate", action="store_true")
+    parser.add_argument("--calibrate-button", default="A")
+    parser.add_argument("--robot-home-deg", type=float, nargs=6)
+    parser.add_argument("--calibrate", action="store_true", help="compatibility: capture the first available sample instead of waiting for a button")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -35,10 +38,12 @@ def main() -> int:
     )
     human_config = HumanArmConfig.from_config({**config.get("human_arm", {}), "side": side})
     mimic_config = JointMimicConfig.from_config(config.get("joint_mimic"))
-    robot_home = mimic_config.neutral_deg.copy()
+    robot_home = np.asarray(args.robot_home_deg, dtype=float) if args.robot_home_deg is not None else mimic_config.neutral_deg.copy()
     shoulder = None
     human_home = None
     previous_elbow = None
+    was_calibrate_pressed = False
+    next_prompt_s = 0.0
     end_s = time.monotonic() + args.seconds
 
     while time.monotonic() < end_s:
@@ -48,13 +53,27 @@ def main() -> int:
             print("No controller sample")
             time.sleep(0.2)
             continue
-        if shoulder is None or args.calibrate and human_home is None:
+        buttons = sample.buttons
+        calibrate_pressed = is_pressed(buttons, args.calibrate_button)
+        if human_home is None:
+            if time.monotonic() >= next_prompt_s:
+                next_prompt_s = time.monotonic() + 1.0
+                print(f"Press {args.calibrate_button} to calibrate joint mimic mapping...")
+            if not args.calibrate and not calibrate_pressed:
+                was_calibrate_pressed = calibrate_pressed
+                time.sleep(0.05)
+                continue
+            if args.calibrate or calibrate_pressed and not was_calibrate_pressed:
+                shoulder = transform[:3, 3] + human_config.fixed_shoulder_from_hand_home_m
+        if shoulder is None:
             shoulder = transform[:3, 3] + human_config.fixed_shoulder_from_hand_home_m
         human = build_human_arm_state(shoulder, transform, human_config.elbow_swivel_default_rad, human_config, previous_elbow)
         previous_elbow = human.elbow_xyz_m
         vector = human_arm_to_mimic_vector_deg(human)
         if human_home is None:
             human_home = vector.copy()
+            print(f"CALIBRATED human_home_vector={human_home.round(2).tolist()} robot_home={robot_home.round(2).tolist()}")
+        was_calibrate_pressed = calibrate_pressed
         delta = vector - human_home
         target = mimic_vector_to_piper_joints(vector, human_home, robot_home, mimic_config)
         print(

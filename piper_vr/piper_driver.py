@@ -279,16 +279,18 @@ class PiperDriver:
     def send_joint_pose(self, joints_deg: np.ndarray) -> None:
         joints_deg = clamp_joints_deg(joints_deg)
         command = [degrees_to_piper_joint_units(float(value)) for value in joints_deg]
-        self.last_joint_command = JointPose(joints_deg.copy())
-        self.has_sent_joint_command = True
         if self.dry_run:
             print(f"[DRY-RUN] JointCtrl joints_deg={joints_deg.round(2).tolist()} raw={command}")
+            self.last_joint_command = JointPose(joints_deg.copy())
+            self.has_sent_joint_command = True
             return
         if self.arm is None:
             raise RuntimeError("Piper is not connected")
         if not hasattr(self.arm, "JointCtrl"):
             raise RuntimeError("No JointCtrl method found in piper_sdk interface.")
         self.arm.JointCtrl(*command)
+        self.last_joint_command = JointPose(joints_deg.copy())
+        self.has_sent_joint_command = True
 
     def send_gripper(self, opening_m: float) -> None:
         opening_m = max(0.0, min(float(opening_m), 0.08))

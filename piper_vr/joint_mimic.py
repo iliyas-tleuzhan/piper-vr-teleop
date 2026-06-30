@@ -18,6 +18,7 @@ class JointMimicConfig:
     neutral_deg: np.ndarray
     max_joint_speed_deg_s: np.ndarray
     smoothing_alpha: float
+    idle_hold_hz: float = 0.0
 
     @classmethod
     def from_config(cls, config: dict | None) -> "JointMimicConfig":
@@ -29,6 +30,7 @@ class JointMimicConfig:
             gains=np.asarray(config.get("gains", [1.0] * 6), dtype=float),
             max_joint_speed_deg_s=np.asarray(config.get("max_joint_speed_deg_s", [25, 25, 25, 45, 45, 60]), dtype=float),
             smoothing_alpha=float(config.get("smoothing_alpha", 0.25)),
+            idle_hold_hz=float(config.get("idle_hold_hz", 0.0)),
         )
 
     def __post_init__(self) -> None:
@@ -39,6 +41,8 @@ class JointMimicConfig:
             setattr(self, name, value)
         if not 0.0 < self.smoothing_alpha <= 1.0:
             raise ValueError("smoothing_alpha must be in the range (0, 1]")
+        if self.idle_hold_hz < 0.0:
+            raise ValueError("idle_hold_hz must be non-negative")
 
 
 def human_arm_to_mimic_vector_deg(human: HumanArmState) -> np.ndarray:

@@ -35,6 +35,8 @@ python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode 
 
 Inspect `state`, `calibrated`, `human_vector_deg`, `human_delta_deg`, `target_joints_deg`, `safe_joints_deg`, `action`, and `quest_age_s`.
 
+Joint mimic is calibration-relative. `A` calibrates, and every fresh `rightGrip` press re-anchors the clutch. If you move the controller while the deadman is released, the next grip should not jump the robot.
+
 ## Joint feedback is unavailable
 
 Run:
@@ -70,13 +72,14 @@ Tune signs and gains in dry-run before using the real robot.
 Use the mapping debugger before real teleop:
 
 ```bash
-python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate
+python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A
 ```
 
 Use manual joint tuning at low speed for hardware sign/gain work:
 
 ```bash
-python3 scripts/tune_joint_mapping_vr.py --can can0 --joint 1 --max-speed 5
+python3 scripts/tune_joint_mapping_vr.py --can can0 --dry-run
+python3 scripts/tune_joint_mapping_vr.py --can can0 --max-speed-deg-s 5
 ```
 
 ## Endpoint axis direction is wrong

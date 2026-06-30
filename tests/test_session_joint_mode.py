@@ -94,8 +94,52 @@ def test_joint_session_allows_dry_run_calibration_without_feedback():
 def test_joint_session_deadman_release_faults_without_feedback_or_command():
     session = make_session()
     driver = FakeJointDriver()
-    session.step(sample({"A": True}), driver)
+    session.step(sample({"A": True, "rightGrip": (1.0,)}), driver)
     driver.feedback_available = False
     released = session.step(sample({"rightGrip": (0.0,)}), driver)
     assert released.state == TeleopState.FAULT
     assert released.reason == "joint_feedback_required_for_hold"
+
+
+def test_fresh_deadman_press_reanchors_without_jump_after_controller_moves_idle():
+    session = make_session()
+    driver = FakeJointDriver()
+    session.step(sample({"A": True}, x=0.4), driver)
+    session.step(sample({"rightGrip": (0.0,)}, x=0.4), driver)
+    session.step(sample({"rightGrip": (0.0,)}, x=0.6), driver)
+
+    armed = session.step(sample({"rightGrip": (1.0,)}, x=0.6), driver)
+    assert armed.reason == "armed_this_cycle"
+    assert not driver.sent
+
+    sent = session.step(sample({"rightGrip": (1.0,)}, x=0.6), driver)
+    assert sent.action == "sent"
+    np.testing.assert_allclose(sent.human_delta_deg, np.zeros(6), atol=1e-6)
+    np.testing.assert_allclose(sent.safe_joint_target_deg, driver.sent[-1].joints_deg, atol=1e-6)
+    np.testing.assert_allclose(sent.safe_joint_target_deg, sent.robot_home_joints_deg, atol=1e-6)
+
+
+def test_after_clutch_anchor_motion_changes_delta_and_target():
+    session = make_session()
+    driver = FakeJointDriver()
+    session.step(sample({"A": True}, x=0.4), driver)
+    session.step(sample({"rightGrip": (0.0,)}, x=0.6), driver)
+    session.step(sample({"rightGrip": (1.0,)}, x=0.6), driver)
+
+    moved = session.step(sample({"rightGrip": (1.0,)}, x=0.7), driver)
+    assert moved.action == "sent"
+    assert np.linalg.norm(moved.human_delta_deg) > 1e-6
+    assert np.linalg.norm(moved.safe_joint_target_deg - moved.robot_home_joints_deg) > 1e-6
+
+
+def test_fresh_deadman_press_requires_feedback_for_real_clutch():
+    session = make_session()
+    driver = FakeJointDriver()
+    session.step(sample({"A": True}, x=0.4), driver)
+    session.step(sample({"rightGrip": (0.0,)}, x=0.4), driver)
+    driver.feedback_available = False
+
+    armed = session.step(sample({"rightGrip": (1.0,)}, x=0.6), driver)
+    assert armed.state == TeleopState.FAULT
+    assert armed.reason == "joint_feedback_required_for_clutch"
+    assert not driver.sent

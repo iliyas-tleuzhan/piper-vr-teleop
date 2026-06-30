@@ -32,6 +32,7 @@ joint_mimic:
   gains: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
   max_joint_speed_deg_s: [25, 25, 25, 45, 45, 60]
   smoothing_alpha: 0.25
+  idle_hold_hz: 0.0
 
 endpoint_firmware:
   scale: 0.40

@@ -99,6 +99,15 @@ def _print_joint_verbose(result, driver: PiperDriver, transport_name: str) -> No
     )
 
 
+def command_joint_hold_on_exit(driver: PiperDriver) -> bool:
+    try:
+        driver.hold_joints(allow_last_command_fallback=True)
+    except RuntimeError as exc:
+        print(f"WARNING: could not command joint hold on exit: {exc}")
+        return False
+    return True
+
+
 class JointMimicJsonlLogger:
     def __init__(self, log_dir: str | Path) -> None:
         directory = Path(log_dir)
@@ -196,11 +205,12 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
             time.sleep(max(0.0, period_s - (time.monotonic() - loop_start)))
     except KeyboardInterrupt:
         print("\nCtrl+C received. Holding at the measured joint pose.")
-        driver.hold_joints(allow_last_command_fallback=True)
+        command_joint_hold_on_exit(driver)
+        return 0
+    finally:
         quest.stop()
         if logger is not None:
             logger.close()
-        return 0
 
 
 def main() -> int:

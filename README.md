@@ -14,6 +14,8 @@ Quest controller pose -> safety/clutch mapping -> EndPoseCtrl -> Piper firmware 
 
 Use `joint_mimic` when the goal is whole-arm teleoperation. It is still approximate because the Quest controller does not directly measure the shoulder or elbow, but the final robot command is six simultaneous joint angles through `JointCtrl`, not firmware endpoint IK. Use `endpoint_firmware` when you only need to move the gripper endpoint and are comfortable letting Piper firmware choose the internal joint posture. `external_ik` is an optional host-side path for endpoint targets plus posture objectives; it sends `JointCtrl` results rather than relying on firmware endpoint IK.
 
+Joint mimic is calibration-relative. Pressing `A` only calibrates; every new `rightGrip` press creates a new clutch anchor. If you move the controller while the deadman is released, the robot should not jump when you grip again.
+
 ## Hardware
 
 - AgileX Piper arm
@@ -52,7 +54,7 @@ python3 scripts/test_piper_joint.py --can can0 --joint 2 --delta-deg 3 --duratio
 
 python3 scripts/check_quest_transport.py --seconds 10
 python3 scripts/debug_human_arm_model.py --side right
-python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate
+python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A
 
 python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --dry-run --verbose --log
 python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --can can0 --speed-percent 5 --max-joint-speed 10 --verbose --log
@@ -87,8 +89,8 @@ python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode 
 ```bash
 python3 scripts/print_piper_joints.py --can can0
 python3 scripts/debug_human_arm_model.py --side right --dry-run
-python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate --dry-run
-python3 scripts/tune_joint_mapping_vr.py --can can0 --joint 1 --max-speed 5
+python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A --dry-run
+python3 scripts/tune_joint_mapping_vr.py --can can0 --dry-run
 python3 -m piper_vr.movep_teleop --config configs/single_piper.yaml --control-mode endpoint_firmware --dry-run --verbose
 python3 -m piper_vr.dual_movep_teleop --config configs/dual_piper.yaml --dry-run
 ```
