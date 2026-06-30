@@ -4,6 +4,11 @@ speed_percent: 5
 
 control_mode: "joint_mimic"
 
+runtime:
+  verbose: true
+  log: true
+  log_dir: "logs/joint_mimic"
+
 side: "right"
 deadman_button: "rightGrip"
 calibrate_button: "A"
@@ -30,7 +35,7 @@ joint_mimic:
   offsets_deg: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   signs: [1, 1, 1, 1, 1, 1]
   gains: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-  max_joint_speed_deg_s: [25, 25, 25, 45, 45, 60]
+  max_joint_speed_deg_s: [5, 5, 5, 5, 5, 5]
   smoothing_alpha: 0.25
   idle_hold_hz: 0.0
 

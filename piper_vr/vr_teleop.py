@@ -44,7 +44,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--joint-mimic-only", action="store_true")
     parser.add_argument("--endpoint-fallback", action="store_true")
     parser.add_argument("--log", action="store_true")
-    parser.add_argument("--log-dir", default="logs/joint_mimic")
+    parser.add_argument("--no-log", action="store_true")
+    parser.add_argument("--quiet", action="store_true")
+    parser.add_argument("--log-dir")
     return parser
 
 
@@ -147,6 +149,15 @@ class JointMimicJsonlLogger:
 
 
 def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
+    runtime = config.get("runtime", {})
+    verbose = bool(args.verbose or runtime.get("verbose", False))
+    if args.quiet:
+        verbose = False
+    log_enabled = bool(args.log or runtime.get("log", False))
+    if args.no_log:
+        log_enabled = False
+    log_dir = args.log_dir or runtime.get("log_dir", "logs/joint_mimic")
+
     hz = float(config.get("hz", 30.0))
     period_s = 1.0 / hz
     side = config.get("side", "right")
@@ -190,7 +201,7 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
     )
 
     next_verbose_s = 0.0
-    logger = JointMimicJsonlLogger(args.log_dir) if args.log else None
+    logger = JointMimicJsonlLogger(log_dir) if log_enabled else None
     if logger is not None:
         print(f"Logging joint mimic JSONL to {logger.path}")
     try:
@@ -199,7 +210,7 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
             result = session.step(quest.get_sample(), driver)
             if logger is not None:
                 logger.write(result)
-            if args.verbose and time.monotonic() >= next_verbose_s:
+            if verbose and time.monotonic() >= next_verbose_s:
                 next_verbose_s = time.monotonic() + 0.2
                 _print_joint_verbose(result, driver, transport_name)
             time.sleep(max(0.0, period_s - (time.monotonic() - loop_start)))

@@ -56,8 +56,8 @@ python3 scripts/check_quest_transport.py --seconds 10
 python3 scripts/debug_human_arm_model.py --side right
 python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A
 
-python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --dry-run --verbose --log
-python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode joint_mimic --can can0 --speed-percent 5 --max-joint-speed 10 --verbose --log
+python3 scripts/run_dry.py
+python3 -m piper_vr.vr_teleop
 ```
 
 `can0` is only an example. Use the CAN interface name your system provides.
@@ -87,6 +87,14 @@ python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --control-mode 
 ## Useful Commands
 
 ```bash
+python3 -m piper_vr.vr_teleop
+python3 scripts/run_real.py
+python3 scripts/run_dry.py
+scripts/run_real.sh
+scripts/run_dry.sh
+python3 -m piper_vr.vr_teleop --can can1
+python3 -m piper_vr.vr_teleop --max-joint-speed 10
+python3 -m piper_vr.vr_teleop --quiet --no-log
 python3 scripts/print_piper_joints.py --can can0
 python3 scripts/debug_human_arm_model.py --side right --dry-run
 python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A --dry-run
