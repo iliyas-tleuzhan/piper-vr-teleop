@@ -9,7 +9,7 @@ from piper_vr.piper_driver import JointPose
 from piper_vr.quest_endpoint_ik import EndpointIKResult
 from piper_vr.session import SessionResult
 from piper_vr.types import TeleopState
-from piper_vr.vr_teleop import _apply_common_overrides, _print_ik_debug, _print_motion_debug, build_parser
+from piper_vr.vr_teleop import _apply_common_overrides, _debug_ik_enabled, _load_runtime_config, _print_ik_debug, _print_motion_debug, build_parser
 
 
 def test_config_deep_merge_mapping_config():
@@ -71,6 +71,21 @@ def test_default_config_has_wrist_enabled_and_nonzero_rows():
     assert np.count_nonzero(mimic.relative_gain_matrix[3:6, 3:6]) == 3
 
 
+def test_default_config_uses_firmware_endpoint_teleop_defaults():
+    config = yaml.safe_load(Path("configs/single_piper.yaml").read_text(encoding="utf-8"))
+    endpoint = config["quest_endpoint_ik"]
+    assert config["control_mode"] == "quest_endpoint_ik"
+    assert config["speed_percent"] == 100
+    assert config["runtime"]["debug_ik"] is True
+    assert config["runtime"]["auto_mapping_config"] == "configs/generated_endpoint_ik_mapping.yaml"
+    assert endpoint["backend"] == "firmware_endpoint"
+    assert endpoint["scale"] == 3.0
+    assert endpoint["position_only_default"] is True
+    assert endpoint["orientation_enabled"] is False
+    assert endpoint["home_delta_clamp_enabled"] is False
+    assert endpoint["workspace_clamp_enabled"] is False
+
+
 def test_wrist_rotation_deadman_null_parses_as_none():
     assert JointMimicConfig.from_config({"wrist_rotation_deadman": None}).wrist_rotation_deadman is None
     assert JointMimicConfig.from_config({"wrist_rotation_deadman": "None"}).wrist_rotation_deadman is None
@@ -110,6 +125,9 @@ def _args(**overrides):
         "workspace_min": None,
         "workspace_max": None,
         "max_position_step_xyz": None,
+        "config": "configs/single_piper.yaml",
+        "mapping_config": None,
+        "debug_ik": False,
     }
     values.update(overrides)
     return Namespace(**values)
@@ -213,3 +231,88 @@ def test_debug_ik_prints_limit_active_when_clamped(capsys):
     assert "home_delta_clamp_enabled=True" in output
     assert "workspace_clamp_enabled=False" in output
     assert "LIMIT ACTIVE: target_clamped_home_delta axes=['x', 'z']" in output
+
+
+def test_debug_ik_can_be_enabled_from_runtime_config():
+    assert _debug_ik_enabled(_args(debug_ik=False), {"runtime": {"debug_ik": True}}) is True
+    assert _debug_ik_enabled(_args(debug_ik=True), {"runtime": {"debug_ik": False}}) is True
+    assert _debug_ik_enabled(_args(debug_ik=False), {"runtime": {"debug_ik": False}}) is False
+
+
+def test_runtime_config_auto_loads_generated_mapping(tmp_path, capsys):
+    base = tmp_path / "base.yaml"
+    mapping = tmp_path / "generated_endpoint_ik_mapping.yaml"
+    base.write_text(
+        "\n".join(
+            [
+                "speed_percent: 100",
+                "runtime:",
+                f"  auto_mapping_config: \"{mapping.as_posix()}\"",
+                "quest_endpoint_ik:",
+                "  scale: 3.0",
+                "  axis_mapping:",
+                "    robot_x: \"+quest_z\"",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    mapping.write_text(
+        "\n".join(
+            [
+                "quest_endpoint_ik:",
+                "  axis_mapping:",
+                "    robot_x: \"-quest_y\"",
+                "    robot_y: \"-quest_x\"",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = _load_runtime_config(_args(config=str(base)))
+    output = capsys.readouterr().out
+    assert f"Auto-loaded mapping config: {mapping.as_posix()}" in output
+    assert config["quest_endpoint_ik"]["scale"] == 3.0
+    assert config["quest_endpoint_ik"]["axis_mapping"]["robot_x"] == "-quest_y"
+    assert config["quest_endpoint_ik"]["axis_mapping"]["robot_y"] == "-quest_x"
+
+
+def test_runtime_config_missing_auto_mapping_is_nonfatal(tmp_path, capsys):
+    missing = tmp_path / "missing.yaml"
+    base = tmp_path / "base.yaml"
+    base.write_text(
+        "\n".join(
+            [
+                "runtime:",
+                f"  auto_mapping_config: \"{missing.as_posix()}\"",
+                "quest_endpoint_ik:",
+                "  scale: 3.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config = _load_runtime_config(_args(config=str(base)))
+    output = capsys.readouterr().out
+    assert f"No generated endpoint mapping found at {missing.as_posix()}; using base config mapping." in output
+    assert config["quest_endpoint_ik"]["scale"] == 3.0
+
+
+def test_explicit_mapping_config_overrides_auto_mapping(tmp_path, capsys):
+    auto_mapping = tmp_path / "auto.yaml"
+    explicit_mapping = tmp_path / "explicit.yaml"
+    base = tmp_path / "base.yaml"
+    base.write_text(
+        "\n".join(
+            [
+                "runtime:",
+                f"  auto_mapping_config: \"{auto_mapping.as_posix()}\"",
+                "quest_endpoint_ik:",
+                "  scale: 3.0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    auto_mapping.write_text("quest_endpoint_ik:\n  scale: 4.0\n", encoding="utf-8")
+    explicit_mapping.write_text("quest_endpoint_ik:\n  scale: 1.0\n", encoding="utf-8")
+    config = _load_runtime_config(_args(config=str(base), mapping_config=str(explicit_mapping)))
+    output = capsys.readouterr().out
+    assert "Auto-loaded mapping config" not in output
+    assert config["quest_endpoint_ik"]["scale"] == 1.0

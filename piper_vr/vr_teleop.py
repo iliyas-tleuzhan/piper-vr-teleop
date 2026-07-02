@@ -26,7 +26,7 @@ from .viz_broadcaster import QuestVizBroadcaster
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Quest 3 to AgileX Piper teleoperation")
     parser.add_argument("--config", default="configs/single_piper.yaml")
-    parser.add_argument("--mapping-config", help="YAML patch merged into --config, normally configs/generated_relative_mapping.yaml")
+    parser.add_argument("--mapping-config", help="YAML patch merged into --config, normally configs/generated_endpoint_ik_mapping.yaml")
     parser.add_argument("--profile", choices=("safe", "normal", "fast"), help="Apply a speed profile from the config")
     parser.add_argument("--control-mode", choices=("joint_mimic", "endpoint_firmware", "external_ik", "quest_endpoint_ik"))
     parser.add_argument("--can")
@@ -159,6 +159,22 @@ def _apply_common_overrides(config: dict, args: argparse.Namespace) -> dict:
     return config
 
 
+def _load_runtime_config(args: argparse.Namespace) -> dict:
+    config = load_config(args.config)
+    if args.mapping_config:
+        return deep_merge(config, load_config(args.mapping_config))
+
+    runtime = config.get("runtime", {})
+    mapping_config = runtime.get("auto_mapping_config", "configs/generated_endpoint_ik_mapping.yaml")
+    mapping_path = Path(mapping_config)
+    if mapping_path.exists():
+        print(f"Auto-loaded mapping config: {mapping_config}")
+        return deep_merge(config, load_config(mapping_config))
+
+    print(f"No generated endpoint mapping found at {mapping_config}; using base config mapping.")
+    return config
+
+
 def _format_array(value: np.ndarray | None, digits: int = 3) -> str:
     if value is None:
         return "None"
@@ -256,6 +272,10 @@ def _print_ik_debug(result, driver: PiperDriver) -> None:
         print(f"LIMIT ACTIVE: target_clamped_home_delta axes={result.clamped_axes}")
     if result.workspace_clamped:
         print(f"LIMIT ACTIVE: target_clamped_workspace axes={result.clamped_axes}")
+
+
+def _debug_ik_enabled(args: argparse.Namespace, config: dict) -> bool:
+    return bool(args.debug_ik or config.get("runtime", {}).get("debug_ik", False))
 
 
 def command_joint_hold_on_exit(driver: PiperDriver) -> bool:
@@ -410,6 +430,7 @@ def _run_joint_mimic(args: argparse.Namespace, config: dict) -> int:
 
 
 def _run_quest_endpoint_ik(args: argparse.Namespace, config: dict) -> int:
+    debug_ik = _debug_ik_enabled(args, config)
     hz = float(config.get("hz", 30.0))
     period_s = 1.0 / hz
     side = config.get("side", "right")
@@ -447,7 +468,7 @@ def _run_quest_endpoint_ik(args: argparse.Namespace, config: dict) -> int:
         while True:
             loop_start = time.monotonic()
             result = session.step(quest.get_sample(), driver)
-            if args.debug_ik and time.monotonic() >= next_debug_s:
+            if debug_ik and time.monotonic() >= next_debug_s:
                 next_debug_s = time.monotonic() + 0.1
                 _print_ik_debug(result, driver)
             time.sleep(max(0.0, period_s - (time.monotonic() - loop_start)))
@@ -461,9 +482,7 @@ def _run_quest_endpoint_ik(args: argparse.Namespace, config: dict) -> int:
 
 def main() -> int:
     args = build_parser().parse_args()
-    config = load_config(args.config)
-    if args.mapping_config:
-        config = deep_merge(config, load_config(args.mapping_config))
+    config = _load_runtime_config(args)
     config = apply_profile(config, args.profile)
     config = _apply_common_overrides(config, args)
     mode = config.get("control_mode", "joint_mimic")

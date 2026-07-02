@@ -14,12 +14,14 @@ profiles:
     speed_percent: 100
     max_joint_speed_deg_s: [90, 90, 90, 90, 90, 90]
 
-control_mode: "joint_mimic"
+control_mode: "quest_endpoint_ik"
 
 runtime:
-  verbose: true
-  log: true
+  verbose: false
+  log: false
   log_dir: "logs/joint_mimic"
+  debug_ik: true
+  auto_mapping_config: "configs/generated_endpoint_ik_mapping.yaml"
 
 viz:
   enabled: false
@@ -120,7 +122,7 @@ quest_endpoint_ik:
   control_frame: "hmd_yaw"
   position_only_default: true
   orientation_enabled: false
-  scale: 0.5
+  scale: 3.0
   scale_xyz: [0.6, 1.5, 0.5]
   orientation_scale: 0.3
   position_deadband_m: 0.003

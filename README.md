@@ -1,20 +1,20 @@
 # Piper VR Teleop
 
-Piper VR Teleop controls an AgileX Piper arm from a Meta Quest 3 controller. The primary mode is now joint-space mimic teleoperation:
+Piper VR Teleop controls an AgileX Piper arm from a Meta Quest 3 controller. The default run is Quest firmware endpoint teleoperation:
+
+```text
+Quest controller pose -> calibrated endpoint target -> Piper firmware endpoint IK
+```
+
+Joint-space mimic teleoperation is still available as an override:
 
 ```text
 Quest controller + inferred human arm model -> six Piper joint targets -> JointCtrl
 ```
 
-Endpoint control is still preserved as a fallback/debug mode:
+Use the default `quest_endpoint_ik` firmware endpoint mode when you want simple Cartesian gripper teleop and are comfortable letting Piper firmware choose the internal joint posture. Use `joint_mimic` when the goal is whole-arm teleoperation. It is still approximate because the Quest controller does not directly measure the shoulder or elbow, but the final robot command is six simultaneous joint angles through `JointCtrl`, not firmware endpoint IK. `external_ik` is an optional host-side path for endpoint targets plus posture objectives; it sends `JointCtrl` results rather than relying on firmware endpoint IK.
 
-```text
-Quest controller pose -> safety/clutch mapping -> EndPoseCtrl -> Piper firmware endpoint IK
-```
-
-Use `joint_mimic` when the goal is whole-arm teleoperation. It is still approximate because the Quest controller does not directly measure the shoulder or elbow, but the final robot command is six simultaneous joint angles through `JointCtrl`, not firmware endpoint IK. Use `endpoint_firmware` when you only need to move the gripper endpoint and are comfortable letting Piper firmware choose the internal joint posture. `external_ik` is an optional host-side path for endpoint targets plus posture objectives; it sends `JointCtrl` results rather than relying on firmware endpoint IK.
-
-`quest_endpoint_ik` is the more natural Cartesian mode. It is closest to AgileX's hand-gesture demo: calibrate a controller home frame, move a tracked hand/controller relative to that frame, map that relative motion to an end-effector target, then solve IK for all six Piper joints. This project uses Quest 3 controller 6DoF tracking instead of camera, MediaPipe, and depth alignment.
+`quest_endpoint_ik` is the more natural Cartesian mode. It is closest to AgileX's hand-gesture demo: calibrate a controller home frame, move a tracked hand/controller relative to that frame, map that relative motion to an end-effector target, then let Piper firmware solve endpoint IK. This project uses Quest 3 controller 6DoF tracking instead of camera, MediaPipe, and depth alignment.
 
 Joint mimic is calibration-relative. Pressing `A` only calibrates; every new `rightGrip` press creates a new clutch anchor. If you move the controller while the deadman is released, the robot should not jump when you grip again.
 
@@ -73,12 +73,12 @@ python3 -m piper_vr.vr_teleop --config configs/generated_relative_mapping.yaml -
 
 ## Quest Endpoint IK Mode
 
-Endpoint IK mode is selected with `control_mode: "quest_endpoint_ik"` or `--endpoint-ik`. In this mode:
+Endpoint IK mode is the default in `configs/single_piper.yaml`. In this mode:
 
 - `A` calibrates the current Quest controller pose and current Piper FK end-effector pose.
 - Holding `rightGrip` maps controller translation to target end-effector XYZ.
 - Holding `rightGrip` maps controller rotation to target end-effector orientation.
-- The host solves IK from the Piper URDF and sends all six joints with `JointCtrl`.
+- The default `firmware_endpoint` backend sends endpoint targets and lets Piper firmware solve IK.
 - Releasing `rightGrip` holds/stops the whole arm.
 
 Real endpoint IK test sequence:
@@ -98,29 +98,17 @@ python3 scripts/predict_endpoint_ik_from_controller.py --config configs/generate
 
 scripts/setup_can.sh can0 1000000
 python3 scripts/print_piper_joints.py --can can0 --debug-feedback
+python3 -m piper_vr.vr_teleop
+```
 
-# First, firmware endpoint dry-run / target test:
-python3 scripts/test_firmware_endpoint_from_quest.py --config configs/generated_endpoint_ik_mapping.yaml
+After `scripts/calibrate_quest_endpoint_frame.py` writes `configs/generated_endpoint_ik_mapping.yaml`, the normal `python3 -m piper_vr.vr_teleop` run auto-loads it. If that file does not exist yet, the base mapping in `configs/single_piper.yaml` is used.
 
-# Then with robot, no send:
-python3 scripts/test_firmware_endpoint_from_quest.py --robot --can can0 --config configs/generated_endpoint_ik_mapping.yaml
+Optional endpoint overrides:
 
-# Then real low-scale firmware endpoint:
-python3 scripts/test_firmware_endpoint_from_quest.py --robot --send --can can0 --config configs/generated_endpoint_ik_mapping.yaml --scale 0.3
-
-# Real teleop, safest first:
-python3 -m piper_vr.vr_teleop \
-  --config configs/single_piper.yaml \
-  --mapping-config configs/generated_endpoint_ik_mapping.yaml \
-  --endpoint-ik \
-  --ik-backend firmware_endpoint \
-  --profile safe \
-  --speed-percent 25 \
-  --ik-scale 0.7 \
-  --position-only \
-  --full-workspace \
-  --debug-ik \
-  --no-log
+```bash
+python3 -m piper_vr.vr_teleop --ik-scale 2
+python3 -m piper_vr.vr_teleop --speed-percent 50
+python3 -m piper_vr.vr_teleop --workspace-clamp
 ```
 
 ### Endpoint IK Direction Tuning
@@ -145,7 +133,7 @@ FK backend notes:
 - If forward/back barely moves, check `quest_endpoint_ik.scale_xyz[0]`, `home_delta_clamp_enabled`, `workspace_clamp_enabled`, and the `--debug-ik` clamped axes.
 - If only some axes move, run teleop with `--debug-ik` and inspect `target_before_home_clamp`, `target_after_home_clamp`, `target_after_workspace_clamp`, and `clamped_axes`.
 
-After direction fixes, real full-workspace firmware endpoint teleop can use:
+The long form equivalent of the default firmware endpoint run is:
 
 ```bash
 python3 -m piper_vr.vr_teleop \
@@ -153,13 +141,11 @@ python3 -m piper_vr.vr_teleop \
   --mapping-config configs/generated_endpoint_ik_mapping.yaml \
   --endpoint-ik \
   --ik-backend firmware_endpoint \
-  --profile safe \
-  --speed-percent 25 \
-  --ik-scale 0.7 \
+  --speed-percent 100 \
+  --ik-scale 3 \
   --position-only \
   --full-workspace \
-  --debug-ik \
-  --no-log
+  --debug-ik
 ```
 
 A more conservative target-box run can use:
@@ -185,13 +171,14 @@ python3 -m piper_vr.vr_teleop \
 ## Controls
 
 - Right controller controls the single Piper by default.
-- `A` calibrates the current human-arm vector to the measured Piper joint pose.
+- `A` calibrates the current controller pose to the measured Piper endpoint pose.
 - After calibration, release and press `rightGrip` before motion starts.
 - Hold `rightGrip` to control all six joints: translation controls joints 1-3, rotation controls joints 4-6.
 - Each new deadman press creates a clutch anchor.
 - Releasing the deadman holds the measured current joint pose in `joint_mimic`.
 - Right joystick X adjusts elbow swivel when configured as `rightJS_x`.
 - Right trigger is not required for wrist rotation. It controls the gripper only when `gripper_enabled: true`.
+- To run joint mimic instead of the default endpoint mode, use `python3 -m piper_vr.vr_teleop --control-mode joint_mimic`.
 
 ## Safety Defaults
 
@@ -209,6 +196,7 @@ python3 -m piper_vr.vr_teleop \
 
 ```bash
 python3 -m piper_vr.vr_teleop
+scripts/run_vr_teleop_default.sh
 python3 scripts/run_real.py
 python3 scripts/run_dry.py
 scripts/run_real.sh
@@ -224,6 +212,7 @@ python3 -m piper_vr.vr_teleop --config configs/single_piper.yaml --mapping-confi
 python3 -m piper_vr.vr_teleop --can can1
 python3 -m piper_vr.vr_teleop --max-joint-speed 10
 python3 -m piper_vr.vr_teleop --quiet --no-log
+python3 -m piper_vr.vr_teleop --control-mode joint_mimic
 python3 scripts/print_piper_joints.py --can can0
 python3 scripts/debug_human_arm_model.py --side right --dry-run
 python3 scripts/debug_joint_mimic_mapping.py --side right --calibrate-button A --dry-run

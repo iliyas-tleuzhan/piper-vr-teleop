@@ -1,6 +1,6 @@
 # Joint Mimic Teleop
 
-`joint_mimic` is the primary mode for this project. It does not send `EndPoseCtrl` as the main command. The host computes all six Piper joint targets and sends them together with `JointCtrl`. The default mapping mode is `relative_delta`.
+`joint_mimic` is the whole-arm teleop mode for this project. It does not send `EndPoseCtrl` as the main command. The host computes all six Piper joint targets and sends them together with `JointCtrl`. The default mapping mode is `relative_delta`.
 
 ## Why This Exists
 
