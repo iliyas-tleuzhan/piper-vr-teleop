@@ -80,6 +80,8 @@ def config(**overrides):
         "orientation_deadband_deg": 0.0,
         "max_position_step_m": 1.0,
         "max_orientation_step_deg": 180.0,
+        "home_delta_clamp_enabled": True,
+        "workspace_clamp_enabled": True,
         "max_delta_from_home_m": [1.0, 1.0, 1.0],
         "max_joint_speed_deg_s": [1000] * 6,
     }
@@ -141,7 +143,10 @@ def test_backend_selection_and_position_only_default():
     cfg = QuestEndpointIKConfig.from_config({})
     assert cfg.backend == "firmware_endpoint"
     assert cfg.orientation_enabled is False
+    assert cfg.home_delta_clamp_enabled is False
+    assert cfg.workspace_clamp_enabled is False
     assert QuestEndpointIKConfig.from_config({"backend": "host_ik_sdk_fk"}).backend == "host_ik_sdk_fk"
+    assert QuestEndpointIKConfig.from_config({"backend": "host_ik_sdk_fk"}).home_delta_clamp_enabled is True
 
 
 def test_official_dh_fk_sanity_units_are_meters():
@@ -183,7 +188,46 @@ def test_endpoint_target_debug_contains_clamp_stages_and_axes():
     assert "target_before_home_clamp" in debug
     assert "target_after_home_clamp" in debug
     assert "target_after_workspace_clamp" in debug
+    assert debug["home_delta_clamp_enabled"] is True
+    assert debug["workspace_clamp_enabled"] is True
+    assert debug["home_delta_clamped"] is True
+    assert debug["workspace_clamped"] is True
     assert debug["clamped_axes"] == ["x", "y", "z"]
+
+
+def test_full_workspace_disables_both_target_clamps():
+    cfg = config(
+        home_delta_clamp_enabled=False,
+        workspace_clamp_enabled=False,
+        max_delta_from_home_m=[0.05, 0.05, 0.05],
+        workspace_min_m=[0.0, -0.1, 0.0],
+        workspace_max_m=[0.4, 0.1, 0.3],
+        axis_mapping={"robot_x": "+quest_x", "robot_y": "+quest_y", "robot_z": "+quest_z"},
+    )
+    target_xyz, _, debug = endpoint_target_from_controller(transform(), transform((0.5, 0.4, 0.3)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    np.testing.assert_allclose(target_xyz, [0.8, 0.4, 0.5])
+    np.testing.assert_allclose(debug["target_after_home_clamp"], [0.8, 0.4, 0.5])
+    np.testing.assert_allclose(debug["target_after_workspace_clamp"], [0.8, 0.4, 0.5])
+    assert debug["home_delta_clamp_enabled"] is False
+    assert debug["workspace_clamp_enabled"] is False
+    assert debug["home_delta_clamped"] is False
+    assert debug["workspace_clamped"] is False
+    assert debug["clamped_axes"] == []
+
+
+def test_clamps_enabled_preserve_old_target_clamp_behavior():
+    cfg = config(
+        home_delta_clamp_enabled=True,
+        workspace_clamp_enabled=True,
+        max_delta_from_home_m=[0.05, 0.05, 0.05],
+        workspace_min_m=[0.0, -0.1, 0.0],
+        workspace_max_m=[0.34, 0.1, 0.24],
+        axis_mapping={"robot_x": "+quest_x", "robot_y": "+quest_y", "robot_z": "+quest_z"},
+    )
+    target_xyz, _, debug = endpoint_target_from_controller(transform(), transform((0.5, 0.4, 0.3)), np.array([0.3, 0.0, 0.2]), np.zeros(3), cfg)
+    np.testing.assert_allclose(target_xyz, [0.34, 0.05, 0.24])
+    assert debug["home_delta_clamped"] is True
+    assert debug["workspace_clamped"] is True
 
 
 def test_max_position_step_m_xyz_allows_y_faster_than_xz():

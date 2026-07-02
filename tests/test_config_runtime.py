@@ -6,9 +6,10 @@ from pathlib import Path
 from piper_vr.config import apply_profile, deep_merge
 from piper_vr.joint_mimic import JointMimicConfig
 from piper_vr.piper_driver import JointPose
+from piper_vr.quest_endpoint_ik import EndpointIKResult
 from piper_vr.session import SessionResult
 from piper_vr.types import TeleopState
-from piper_vr.vr_teleop import _apply_common_overrides, _print_motion_debug
+from piper_vr.vr_teleop import _apply_common_overrides, _print_ik_debug, _print_motion_debug, build_parser
 
 
 def test_config_deep_merge_mapping_config():
@@ -93,6 +94,22 @@ def _args(**overrides):
         "wrist_gain": None,
         "translation_only": False,
         "rotation_only": False,
+        "endpoint_ik": False,
+        "ik_backend": None,
+        "ik_scale": None,
+        "ik_orientation_scale": None,
+        "disable_orientation": False,
+        "position_only": False,
+        "orientation_enabled": False,
+        "full_workspace": False,
+        "no_home_delta_clamp": False,
+        "no_workspace_clamp": False,
+        "home_delta_clamp": False,
+        "workspace_clamp": False,
+        "max_delta_from_home": None,
+        "workspace_min": None,
+        "workspace_max": None,
+        "max_position_step_xyz": None,
     }
     values.update(overrides)
     return Namespace(**values)
@@ -120,3 +137,79 @@ def test_rotation_only_zeroes_translation_channels():
     assert rotation_only["joint_mimic"]["wrist_rotation_enabled"] is True
     assert np.count_nonzero(matrix[0:3, :]) == 0
     assert np.count_nonzero(matrix[:, 0:3]) == 0
+
+
+def test_endpoint_full_workspace_cli_disables_target_clamps():
+    config = {"quest_endpoint_ik": {"home_delta_clamp_enabled": True, "workspace_clamp_enabled": True}}
+    updated = _apply_common_overrides(config, _args(full_workspace=True))
+    assert updated["quest_endpoint_ik"]["home_delta_clamp_enabled"] is False
+    assert updated["quest_endpoint_ik"]["workspace_clamp_enabled"] is False
+
+
+def test_endpoint_cli_numeric_workspace_overrides():
+    updated = _apply_common_overrides(
+        {"quest_endpoint_ik": {}},
+        _args(
+            max_delta_from_home=[0.6, 0.5, 0.4],
+            workspace_min=[-1.0, -0.9, -0.2],
+            workspace_max=[1.0, 0.9, 0.8],
+            max_position_step_xyz=[0.025, 0.035, 0.025],
+        ),
+    )
+    endpoint = updated["quest_endpoint_ik"]
+    assert endpoint["max_delta_from_home_m"] == [0.6, 0.5, 0.4]
+    assert endpoint["workspace_min_m"] == [-1.0, -0.9, -0.2]
+    assert endpoint["workspace_max_m"] == [1.0, 0.9, 0.8]
+    assert endpoint["max_position_step_m_xyz"] == [0.025, 0.035, 0.025]
+
+
+def test_endpoint_workspace_flags_parse():
+    args = build_parser().parse_args(
+        [
+            "--endpoint-ik",
+            "--full-workspace",
+            "--max-delta-from-home",
+            "0.6",
+            "0.6",
+            "0.5",
+            "--workspace-min",
+            "-1.0",
+            "-1.0",
+            "-0.2",
+            "--workspace-max",
+            "1.0",
+            "1.0",
+            "1.0",
+            "--max-position-step-xyz",
+            "0.025",
+            "0.035",
+            "0.025",
+        ]
+    )
+    assert args.endpoint_ik is True
+    assert args.full_workspace is True
+    assert args.max_delta_from_home == [0.6, 0.6, 0.5]
+    assert args.workspace_min == [-1.0, -1.0, -0.2]
+    assert args.workspace_max == [1.0, 1.0, 1.0]
+    assert args.max_position_step_xyz == [0.025, 0.035, 0.025]
+
+
+def test_debug_ik_prints_limit_active_when_clamped(capsys):
+    class Driver:
+        def read_joint_pose(self):
+            return None
+
+    result = EndpointIKResult(
+        state=TeleopState.ACTIVE,
+        calibrated=True,
+        home_delta_clamp_enabled=True,
+        workspace_clamp_enabled=False,
+        home_delta_clamped=True,
+        workspace_clamped=False,
+        clamped_axes=["x", "z"],
+    )
+    _print_ik_debug(result, Driver())
+    output = capsys.readouterr().out
+    assert "home_delta_clamp_enabled=True" in output
+    assert "workspace_clamp_enabled=False" in output
+    assert "LIMIT ACTIVE: target_clamped_home_delta axes=['x', 'z']" in output

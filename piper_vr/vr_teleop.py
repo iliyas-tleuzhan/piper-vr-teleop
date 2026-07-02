@@ -63,6 +63,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ik-orientation-scale", type=float, help="Quest endpoint IK orientation scale")
     parser.add_argument("--position-only", action="store_true", help="disable endpoint IK orientation control")
     parser.add_argument("--disable-orientation", action="store_true", help="disable endpoint IK orientation control")
+    parser.add_argument("--full-workspace", action="store_true", help="disable endpoint IK home-relative and absolute workspace target clamps")
+    parser.add_argument("--no-home-delta-clamp", action="store_true", help="disable endpoint IK target clamp around calibration home")
+    parser.add_argument("--no-workspace-clamp", action="store_true", help="disable endpoint IK absolute workspace target clamp")
+    parser.add_argument("--home-delta-clamp", action="store_true", help="enable endpoint IK target clamp around calibration home")
+    parser.add_argument("--workspace-clamp", action="store_true", help="enable endpoint IK absolute workspace target clamp")
+    parser.add_argument("--max-delta-from-home", nargs=3, type=float, metavar=("X", "Y", "Z"), help="endpoint IK home-relative clamp half extents in meters")
+    parser.add_argument("--workspace-min", nargs=3, type=float, metavar=("X", "Y", "Z"), help="endpoint IK absolute workspace minimum in meters")
+    parser.add_argument("--workspace-max", nargs=3, type=float, metavar=("X", "Y", "Z"), help="endpoint IK absolute workspace maximum in meters")
+    parser.add_argument("--max-position-step-xyz", nargs=3, type=float, metavar=("X", "Y", "Z"), help="endpoint IK per-cycle XYZ step limit in meters")
     parser.add_argument("--debug-ik", action="store_true", help="print endpoint IK internals at 10 Hz")
     return parser
 
@@ -98,6 +107,25 @@ def _apply_common_overrides(config: dict, args: argparse.Namespace) -> dict:
     if getattr(args, "rotation_only", False):
         endpoint_ik["translation_enabled"] = False
         endpoint_ik["orientation_enabled"] = True
+    if getattr(args, "full_workspace", False):
+        endpoint_ik["home_delta_clamp_enabled"] = False
+        endpoint_ik["workspace_clamp_enabled"] = False
+    if getattr(args, "no_home_delta_clamp", False):
+        endpoint_ik["home_delta_clamp_enabled"] = False
+    if getattr(args, "no_workspace_clamp", False):
+        endpoint_ik["workspace_clamp_enabled"] = False
+    if getattr(args, "home_delta_clamp", False):
+        endpoint_ik["home_delta_clamp_enabled"] = True
+    if getattr(args, "workspace_clamp", False):
+        endpoint_ik["workspace_clamp_enabled"] = True
+    if getattr(args, "max_delta_from_home", None) is not None:
+        endpoint_ik["max_delta_from_home_m"] = [float(value) for value in args.max_delta_from_home]
+    if getattr(args, "workspace_min", None) is not None:
+        endpoint_ik["workspace_min_m"] = [float(value) for value in args.workspace_min]
+    if getattr(args, "workspace_max", None) is not None:
+        endpoint_ik["workspace_max_m"] = [float(value) for value in args.workspace_max]
+    if getattr(args, "max_position_step_xyz", None) is not None:
+        endpoint_ik["max_position_step_m_xyz"] = [float(value) for value in args.max_position_step_xyz]
     if args.max_joint_speed is not None:
         mimic = config.setdefault("joint_mimic", {})
         mimic["max_joint_speed_deg_s"] = [float(args.max_joint_speed)] * 6
@@ -205,6 +233,8 @@ def _print_ik_debug(result, driver: PiperDriver) -> None:
         f"scale={getattr(result, 'scale', None)} "
         f"scale_xyz={_format_array(getattr(result, 'scale_xyz', None), 3)} "
         f"scaled_robot_delta_xyz={_format_array(result.scaled_robot_delta_xyz, 4)} "
+        f"home_delta_clamp_enabled={result.home_delta_clamp_enabled} "
+        f"workspace_clamp_enabled={result.workspace_clamp_enabled} "
         f"target_before_home_clamp={_format_array(result.target_before_home_clamp, 4)} "
         f"target_after_home_clamp={_format_array(result.target_after_home_clamp, 4)} "
         f"target_after_workspace_clamp={_format_array(result.target_after_workspace_clamp, 4)} "
@@ -222,6 +252,10 @@ def _print_ik_debug(result, driver: PiperDriver) -> None:
         f"firmware_rpy_raw={None if result.target_rpy_deg is None else [degrees_to_piper_rpy(float(v)) for v in result.target_rpy_deg]} "
         f"action={result.action}:{result.reason}"
     )
+    if result.home_delta_clamped:
+        print(f"LIMIT ACTIVE: target_clamped_home_delta axes={result.clamped_axes}")
+    if result.workspace_clamped:
+        print(f"LIMIT ACTIVE: target_clamped_workspace axes={result.clamped_axes}")
 
 
 def command_joint_hold_on_exit(driver: PiperDriver) -> bool:

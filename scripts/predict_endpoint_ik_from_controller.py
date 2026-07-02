@@ -32,6 +32,42 @@ def _load_with_base(path: str) -> dict:
     return config
 
 
+def _add_workspace_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--full-workspace", action="store_true", help="disable home-relative and absolute workspace target clamps")
+    parser.add_argument("--no-home-delta-clamp", action="store_true", help="disable target clamp around calibration home")
+    parser.add_argument("--no-workspace-clamp", action="store_true", help="disable absolute workspace target clamp")
+    parser.add_argument("--home-delta-clamp", action="store_true", help="enable target clamp around calibration home")
+    parser.add_argument("--workspace-clamp", action="store_true", help="enable absolute workspace target clamp")
+    parser.add_argument("--max-delta-from-home", nargs=3, type=float, metavar=("X", "Y", "Z"))
+    parser.add_argument("--workspace-min", nargs=3, type=float, metavar=("X", "Y", "Z"))
+    parser.add_argument("--workspace-max", nargs=3, type=float, metavar=("X", "Y", "Z"))
+    parser.add_argument("--max-position-step-xyz", nargs=3, type=float, metavar=("X", "Y", "Z"))
+
+
+def _apply_workspace_args(config: dict, args: argparse.Namespace) -> dict:
+    endpoint = config.setdefault("quest_endpoint_ik", {})
+    if args.full_workspace:
+        endpoint["home_delta_clamp_enabled"] = False
+        endpoint["workspace_clamp_enabled"] = False
+    if args.no_home_delta_clamp:
+        endpoint["home_delta_clamp_enabled"] = False
+    if args.no_workspace_clamp:
+        endpoint["workspace_clamp_enabled"] = False
+    if args.home_delta_clamp:
+        endpoint["home_delta_clamp_enabled"] = True
+    if args.workspace_clamp:
+        endpoint["workspace_clamp_enabled"] = True
+    if args.max_delta_from_home is not None:
+        endpoint["max_delta_from_home_m"] = [float(value) for value in args.max_delta_from_home]
+    if args.workspace_min is not None:
+        endpoint["workspace_min_m"] = [float(value) for value in args.workspace_min]
+    if args.workspace_max is not None:
+        endpoint["workspace_max_m"] = [float(value) for value in args.workspace_max]
+    if args.max_position_step_xyz is not None:
+        endpoint["max_position_step_m_xyz"] = [float(value) for value in args.max_position_step_xyz]
+    return config
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Predict endpoint IK targets from Quest controller motion")
     parser.add_argument("--config", default="configs/single_piper.yaml")
@@ -39,9 +75,10 @@ def main() -> int:
     parser.add_argument("--robot", action="store_true", help="read real Piper FK/IK seed")
     parser.add_argument("--send", action="store_true", help="with --robot, send solved joint commands")
     parser.add_argument("--can", default=None)
+    _add_workspace_args(parser)
     args = parser.parse_args()
 
-    config = _load_with_base(args.config)
+    config = _apply_workspace_args(_load_with_base(args.config), args)
     side = args.side or config.get("side", "right")
     button = config.get("calibrate_button", "A")
     quest_config = config.get("quest", {})
@@ -106,8 +143,13 @@ def main() -> int:
                 f"controller_delta_xyz={_fmt(debug['controller_delta_xyz'], 4)} "
                 f"mapped_robot_delta_xyz={_fmt(debug['mapped_robot_delta_xyz'], 4)} "
                 f"scaled_robot_delta_xyz={_fmt(debug['scaled_robot_delta_xyz'], 4)} "
+                f"home_delta_clamp_enabled={debug['home_delta_clamp_enabled']} "
+                f"workspace_clamp_enabled={debug['workspace_clamp_enabled']} "
                 f"target_before_home_clamp={_fmt(debug['target_before_home_clamp'], 4)} "
                 f"target_after_home_clamp={_fmt(debug['target_after_home_clamp'], 4)} "
+                f"target_after_workspace_clamp={_fmt(debug['target_after_workspace_clamp'], 4)} "
+                f"home_delta_clamped={debug['home_delta_clamped']} "
+                f"workspace_clamped={debug['workspace_clamped']} "
                 f"clamped_axes={debug['clamped_axes']} "
                 f"target_xyz={_fmt(target_xyz, 4)} "
                 f"controller_delta_rpy={_fmt(debug['controller_delta_rpy_deg'], 2)} "

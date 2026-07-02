@@ -75,6 +75,8 @@ class QuestEndpointIKConfig:
     max_position_step_m: float = 0.02
     max_position_step_m_xyz: np.ndarray = None
     max_orientation_step_deg: float = 5.0
+    home_delta_clamp_enabled: bool = True
+    workspace_clamp_enabled: bool = True
     max_delta_from_home_m: np.ndarray = None
     workspace_min_m: np.ndarray = None
     workspace_max_m: np.ndarray = None
@@ -93,8 +95,10 @@ class QuestEndpointIKConfig:
     @classmethod
     def from_config(cls, config: dict | None) -> "QuestEndpointIKConfig":
         config = config or {}
+        backend = str(config.get("backend", "firmware_endpoint"))
+        default_target_clamps_enabled = backend != "firmware_endpoint"
         return cls(
-            backend=str(config.get("backend", "firmware_endpoint")),
+            backend=backend,
             urdf_path=str(config.get("urdf_path", "third_party/agx_arm_urdf/piper/urdf/piper_description.urdf")),
             ee_frame=str(config.get("ee_frame", "link6")),
             scale=float(config.get("scale", 1.0)),
@@ -108,6 +112,8 @@ class QuestEndpointIKConfig:
             max_position_step_m=float(config.get("max_position_step_m", 0.02)),
             max_position_step_m_xyz=np.asarray(config.get("max_position_step_m_xyz", [config.get("max_position_step_m", 0.02)] * 3), dtype=float),
             max_orientation_step_deg=float(config.get("max_orientation_step_deg", 5.0)),
+            home_delta_clamp_enabled=bool(config.get("home_delta_clamp_enabled", default_target_clamps_enabled)),
+            workspace_clamp_enabled=bool(config.get("workspace_clamp_enabled", default_target_clamps_enabled)),
             max_delta_from_home_m=np.asarray(config.get("max_delta_from_home_m", [0.20, 0.20, 0.18]), dtype=float),
             workspace_min_m=np.asarray(config.get("workspace_min_m", [0.18, -0.35, 0.08]), dtype=float),
             workspace_max_m=np.asarray(config.get("workspace_max_m", [0.65, 0.35, 0.60]), dtype=float),
@@ -156,6 +162,10 @@ class EndpointIKResult:
     target_before_home_clamp: np.ndarray | None = None
     target_after_home_clamp: np.ndarray | None = None
     target_after_workspace_clamp: np.ndarray | None = None
+    home_delta_clamp_enabled: bool = False
+    workspace_clamp_enabled: bool = False
+    home_delta_clamped: bool = False
+    workspace_clamped: bool = False
     clamped_axes: list[str] | None = None
     control_frame: str | None = None
     scale: float | None = None
@@ -378,6 +388,10 @@ class QuestEndpointIKSession:
         result.target_before_home_clamp = debug["target_before_home_clamp"]
         result.target_after_home_clamp = debug["target_after_home_clamp"]
         result.target_after_workspace_clamp = debug["target_after_workspace_clamp"]
+        result.home_delta_clamp_enabled = bool(debug["home_delta_clamp_enabled"])
+        result.workspace_clamp_enabled = bool(debug["workspace_clamp_enabled"])
+        result.home_delta_clamped = bool(debug["home_delta_clamped"])
+        result.workspace_clamped = bool(debug["workspace_clamped"])
         result.clamped_axes = debug["clamped_axes"]
         result.control_frame = self.config.control_frame
         result.scale = self.config.scale
@@ -525,8 +539,13 @@ def endpoint_target_from_controller(
     mapped_rpy = config.rotation_mapping.apply(controller_delta_rpy) if config.orientation_enabled else np.zeros(3)
     scaled_xyz = mapped_xyz * config.scale * config.scale_xyz
     raw_target_xyz = np.asarray(robot_home_xyz, dtype=float) + scaled_xyz
-    home_clamped_xyz = clamp_to_home_box(raw_target_xyz, robot_home_xyz, config)
-    target_xyz = clamp_workspace(home_clamped_xyz, config)
+    target_after_home = raw_target_xyz
+    if config.home_delta_clamp_enabled:
+        target_after_home = clamp_to_home_box(raw_target_xyz, robot_home_xyz, config)
+    target_after_workspace = target_after_home
+    if config.workspace_clamp_enabled:
+        target_after_workspace = clamp_workspace(target_after_home, config)
+    target_xyz = target_after_workspace
     mapped_rpy = clamp_orientation_delta(mapped_rpy * config.orientation_scale, config)
     target_rpy = np.asarray(robot_home_rpy_deg, dtype=float) + mapped_rpy
     target_rpy = np.asarray(robot_home_rpy_deg, dtype=float) + np.clip(target_rpy - robot_home_rpy_deg, -config.max_orientation_delta_deg, config.max_orientation_delta_deg)
@@ -537,11 +556,13 @@ def endpoint_target_from_controller(
         "controller_delta_rpy_deg": controller_delta_rpy,
         "mapped_robot_delta_rpy_deg": mapped_rpy,
         "target_before_home_clamp": raw_target_xyz,
-        "target_after_home_clamp": home_clamped_xyz,
-        "target_after_workspace_clamp": target_xyz,
+        "home_delta_clamp_enabled": config.home_delta_clamp_enabled,
+        "workspace_clamp_enabled": config.workspace_clamp_enabled,
+        "target_after_home_clamp": target_after_home,
+        "target_after_workspace_clamp": target_after_workspace,
         "clamped_axes": [axis for axis, before, after in zip(("x", "y", "z"), raw_target_xyz, target_xyz, strict=True) if not np.isclose(before, after)],
-        "home_delta_clamped": not np.allclose(raw_target_xyz, home_clamped_xyz),
-        "workspace_clamped": not np.allclose(home_clamped_xyz, target_xyz),
+        "home_delta_clamped": config.home_delta_clamp_enabled and not np.allclose(raw_target_xyz, target_after_home),
+        "workspace_clamped": config.workspace_clamp_enabled and not np.allclose(target_after_home, target_after_workspace),
     }
 
 

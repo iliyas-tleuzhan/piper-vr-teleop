@@ -127,12 +127,16 @@ quest_endpoint_ik:
   orientation_deadband_deg: 3.0
   position_filter_alpha: 0.35
   orientation_filter_alpha: 0.35
-  max_delta_from_home_m: [0.20, 0.20, 0.18]
+  home_delta_clamp_enabled: false
+  workspace_clamp_enabled: false
+  # Used only when home_delta_clamp_enabled is true.
+  max_delta_from_home_m: [0.60, 0.60, 0.50]
   max_position_step_m: 0.01
-  max_position_step_m_xyz: [0.012, 0.025, 0.012]
+  max_position_step_m_xyz: [0.025, 0.035, 0.025]
   max_orientation_step_deg: 3.0
-  workspace_min_m: [0.18, -0.35, 0.08]
-  workspace_max_m: [0.65, 0.35, 0.60]
+  # Used only when workspace_clamp_enabled is true.
+  workspace_min_m: [-1.00, -1.00, -0.20]
+  workspace_max_m: [1.00, 1.00, 1.00]
   max_joint_speed_deg_s: [20, 20, 20, 30, 30, 45]
   ik_position_tolerance_m: 0.008
   ik_orientation_tolerance_deg: 10.0

@@ -36,6 +36,42 @@ def _load_with_base(path: str) -> dict:
     return deep_merge(load_config("configs/single_piper.yaml"), load_config(path))
 
 
+def _add_workspace_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--full-workspace", action="store_true", help="disable home-relative and absolute workspace target clamps")
+    parser.add_argument("--no-home-delta-clamp", action="store_true", help="disable target clamp around calibration home")
+    parser.add_argument("--no-workspace-clamp", action="store_true", help="disable absolute workspace target clamp")
+    parser.add_argument("--home-delta-clamp", action="store_true", help="enable target clamp around calibration home")
+    parser.add_argument("--workspace-clamp", action="store_true", help="enable absolute workspace target clamp")
+    parser.add_argument("--max-delta-from-home", nargs=3, type=float, metavar=("X", "Y", "Z"))
+    parser.add_argument("--workspace-min", nargs=3, type=float, metavar=("X", "Y", "Z"))
+    parser.add_argument("--workspace-max", nargs=3, type=float, metavar=("X", "Y", "Z"))
+    parser.add_argument("--max-position-step-xyz", nargs=3, type=float, metavar=("X", "Y", "Z"))
+
+
+def _apply_workspace_args(config: dict, args: argparse.Namespace) -> dict:
+    endpoint = config.setdefault("quest_endpoint_ik", {})
+    if args.full_workspace:
+        endpoint["home_delta_clamp_enabled"] = False
+        endpoint["workspace_clamp_enabled"] = False
+    if args.no_home_delta_clamp:
+        endpoint["home_delta_clamp_enabled"] = False
+    if args.no_workspace_clamp:
+        endpoint["workspace_clamp_enabled"] = False
+    if args.home_delta_clamp:
+        endpoint["home_delta_clamp_enabled"] = True
+    if args.workspace_clamp:
+        endpoint["workspace_clamp_enabled"] = True
+    if args.max_delta_from_home is not None:
+        endpoint["max_delta_from_home_m"] = [float(value) for value in args.max_delta_from_home]
+    if args.workspace_min is not None:
+        endpoint["workspace_min_m"] = [float(value) for value in args.workspace_min]
+    if args.workspace_max is not None:
+        endpoint["workspace_max_m"] = [float(value) for value in args.workspace_max]
+    if args.max_position_step_xyz is not None:
+        endpoint["max_position_step_m_xyz"] = [float(value) for value in args.max_position_step_xyz]
+    return config
+
+
 def _wait_button(quest: QuestReader, side: str, button: str, prompt: str):
     print(prompt)
     was_pressed = True
@@ -64,9 +100,10 @@ def main() -> int:
     parser.add_argument("--config", default="configs/generated_endpoint_ik_mapping.yaml")
     parser.add_argument("--side", choices=("left", "right"), default=None)
     parser.add_argument("--dry-run", action="store_true")
+    _add_workspace_args(parser)
     args = parser.parse_args()
 
-    config = _load_with_base(args.config)
+    config = _apply_workspace_args(_load_with_base(args.config), args)
     side = args.side or config.get("side", "right")
     button = config.get("calibrate_button", "A")
     quest_config = config.get("quest", {})
@@ -93,6 +130,11 @@ def main() -> int:
             print(f"  controller_delta_xyz = {_fmt(debug['controller_delta_xyz'])}")
             print(f"  mapped_robot_delta_xyz = {_fmt(debug['mapped_robot_delta_xyz'])}")
             print(f"  scaled_robot_delta_xyz = {_fmt(debug['scaled_robot_delta_xyz'])}")
+            print(f"  home_delta_clamp_enabled = {debug['home_delta_clamp_enabled']}")
+            print(f"  workspace_clamp_enabled = {debug['workspace_clamp_enabled']}")
+            print(f"  home_delta_clamped = {debug['home_delta_clamped']}")
+            print(f"  workspace_clamped = {debug['workspace_clamped']}")
+            print(f"  clamped_axes = {debug['clamped_axes']}")
             print(f"  expected robot axis: {'+' if expected_sign > 0 else '-'}{robot_axis[-1].upper()}")
             print(f"  {'PASS' if passed else 'FAIL'}")
             if not passed:

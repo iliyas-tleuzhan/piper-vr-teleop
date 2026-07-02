@@ -115,8 +115,10 @@ python3 -m piper_vr.vr_teleop \
   --endpoint-ik \
   --ik-backend firmware_endpoint \
   --profile safe \
-  --ik-scale 0.3 \
+  --speed-percent 25 \
+  --ik-scale 0.7 \
   --position-only \
+  --full-workspace \
   --debug-ik \
   --no-log
 ```
@@ -140,10 +142,10 @@ FK backend notes:
 
 - If forward/back is inverted, rerun calibration and check the generated `quest_endpoint_ik.axis_mapping.robot_x` sign.
 - If left/right is slow, increase `quest_endpoint_ik.scale_xyz[1]`.
-- If forward/back barely moves, check `quest_endpoint_ik.scale_xyz[0]`, `max_delta_from_home_m`, and the `--debug-ik` clamped axes.
+- If forward/back barely moves, check `quest_endpoint_ik.scale_xyz[0]`, `home_delta_clamp_enabled`, `workspace_clamp_enabled`, and the `--debug-ik` clamped axes.
 - If only some axes move, run teleop with `--debug-ik` and inspect `target_before_home_clamp`, `target_after_home_clamp`, `target_after_workspace_clamp`, and `clamped_axes`.
 
-After direction fixes, a faster lateral firmware endpoint test can use:
+After direction fixes, real full-workspace firmware endpoint teleop can use:
 
 ```bash
 python3 -m piper_vr.vr_teleop \
@@ -152,9 +154,30 @@ python3 -m piper_vr.vr_teleop \
   --endpoint-ik \
   --ik-backend firmware_endpoint \
   --profile safe \
-  --endpoint-speed-percent 25 \
+  --speed-percent 25 \
+  --ik-scale 0.7 \
+  --position-only \
+  --full-workspace \
+  --debug-ik \
+  --no-log
+```
+
+A more conservative target-box run can use:
+
+```bash
+python3 -m piper_vr.vr_teleop \
+  --config configs/single_piper.yaml \
+  --mapping-config configs/generated_endpoint_ik_mapping.yaml \
+  --endpoint-ik \
+  --ik-backend firmware_endpoint \
+  --profile safe \
+  --speed-percent 20 \
   --ik-scale 0.5 \
   --position-only \
+  --no-home-delta-clamp \
+  --workspace-clamp \
+  --workspace-min 0.05 -0.55 0.02 \
+  --workspace-max 0.80 0.55 0.75 \
   --debug-ik \
   --no-log
 ```
